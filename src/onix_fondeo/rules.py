@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from onix_fondeo.models import Account
+from onix_fondeo.models import Account, Payout
 
 
 def check_max_drawdown(account: Account, max_drawdown: float) -> bool:
@@ -61,3 +61,46 @@ def check_evaluation_status(
         return "ACTIVE", None
 
     return "PASSED", "Profit target reached"
+
+
+def check_funded_status(
+    account: Account,
+    funded_rules: dict[str, Any],
+) -> tuple[str, str | None]:
+    if not funded_rules.get("enabled", True):
+        return "ACTIVE", None
+
+    if check_max_drawdown(account, funded_rules["max_drawdown"]):
+        return "FAILED", "Funded max drawdown breached"
+
+    if check_max_daily_loss(account, funded_rules.get("max_daily_loss")):
+        return "FAILED", "Funded max daily loss breached"
+
+    if account.pnl >= funded_rules["payout_trigger_profit"]:
+        return "PAYOUT_ELIGIBLE", "Payout trigger reached"
+
+    return "ACTIVE", None
+
+
+def process_funded_payout(
+    account: Account,
+    payout_time: Any,
+    funded_rules: dict[str, Any],
+) -> Payout:
+    gross_payout = funded_rules["minimum_withdrawable_profit"]
+    payout = account.register_payout(
+        payout_time=payout_time,
+        gross_payout=gross_payout,
+        profit_split=funded_rules["profit_split"],
+    )
+
+    if funded_rules.get("reset_after_payout", False):
+        account.pnl = 0.0
+        account.high_watermark = 0.0
+        account.daily_pnl.clear()
+        account.trading_days.clear()
+    else:
+        account.pnl -= gross_payout
+        account.high_watermark = account.pnl
+
+    return payout
