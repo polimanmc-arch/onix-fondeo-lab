@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "max_drawdown": 2000,
+  "max_daily_loss": null,
+  "mll_freeze_profit": 2100,
+  "minimum_withdrawable_profit": 2000,
+  "payout_trigger_profit": 4100,
+  "profit_split": 0.8,
+  "reset_after_payout": false
+}

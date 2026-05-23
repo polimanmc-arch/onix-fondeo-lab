@@ -1,0 +1,5 @@
+{
+  "max_accounts": 100,
+  "recycle_failed_accounts": true,
+  "continue_after_pass": true
+}
