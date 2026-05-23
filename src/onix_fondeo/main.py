@@ -1,4 +1,5 @@
 from onix_fondeo.loader import load_all_configs, load_trades
+from onix_fondeo.metrics import calculate_business_metrics
 from onix_fondeo.report import export_results
 from onix_fondeo.simulator import simulate_funding
 
@@ -9,7 +10,8 @@ def main():
     trades = load_trades()
     config = load_all_configs()
     results = simulate_funding(trades, config)
-    exported_files = export_results(results)
+    metrics = calculate_business_metrics(results, config)
+    exported_files = export_results(results, metrics=metrics)
 
     print("\nSimulation summary:")
     print(f"Total accounts: {len(results['accounts'])}")
@@ -35,6 +37,24 @@ def main():
             f"Gross: {payout.gross_payout:.2f} | "
             f"Net: {payout.net_payout:.2f}"
         )
+
+    print("\nBusiness metrics:")
+    print(f"Total evaluations: {metrics['total_evaluations']}")
+    print(f"Passed evaluations: {metrics['passed_evaluations']}")
+    print(f"Failed evaluations: {metrics['failed_evaluations']}")
+    print(f"Pass rate: {metrics['pass_rate']:.2%}")
+    print(
+        "Payout rate on evaluations: "
+        f"{metrics['payout_rate_on_evaluations']:.2%}"
+    )
+    print(f"Total evaluation cost: {metrics['total_evaluation_cost']:.2f}")
+    print(f"Total net payout: {metrics['total_net_payout']:.2f}")
+    print(f"Net business PnL: {metrics['net_business_pnl']:.2f}")
+    print(f"ROI: {metrics['roi']:.2%}")
+    print(
+        "Expected value per evaluation: "
+        f"{metrics['expected_value_per_evaluation']:.2f}"
+    )
 
     print("\nExported files:")
     for name, path in exported_files.items():

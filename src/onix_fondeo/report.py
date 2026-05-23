@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -94,6 +95,7 @@ def payouts_to_dataframe(payouts: list[Payout]) -> pd.DataFrame:
 def export_results(
     results: dict[str, Any],
     output_dir: str | Path = "data/output",
+    metrics: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -122,4 +124,21 @@ def export_results(
         index=False,
     )
 
+    if metrics is not None:
+        file_paths["business_metrics"] = export_metrics(metrics, output_path)
+
     return file_paths
+
+
+def export_metrics(
+    metrics: dict[str, Any],
+    output_dir: str | Path = "data/output",
+) -> Path:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    file_path = output_path / "business_metrics.json"
+    with file_path.open("w", encoding="utf-8") as file:
+        json.dump(metrics, file, indent=2, default=str)
+
+    return file_path
