@@ -1,4 +1,5 @@
 from onix_fondeo.loader import load_all_configs, load_trades
+from onix_fondeo.simulator import simulate_funding
 
 
 def main():
@@ -6,18 +7,32 @@ def main():
 
     trades = load_trades()
     config = load_all_configs()
+    results = simulate_funding(trades, config)
 
-    print("\nTrades loaded successfully:")
-    print(trades.head())
+    print("\nSimulation summary:")
+    print(f"Total accounts: {len(results['accounts'])}")
+    print(f"Total trade log rows: {len(results['trade_log'])}")
+    print(f"Total payouts: {len(results['payouts'])}")
+    print(f"Total business events: {len(results['business_events'])}")
 
-    print("\nEvaluation rules:")
-    print(config["evaluation"])
+    print("\nAccount summary:")
+    for account in results["accounts"]:
+        print(
+            f"Account {account.account_id} | "
+            f"{account.phase} | "
+            f"{account.status} | "
+            f"PnL: {account.pnl:.2f} | "
+            f"Trades: {account.trades_count} | "
+            f"Reason: {account.result_reason}"
+        )
 
-    print("\nFunded rules:")
-    print(config["funded"])
-
-    print("\nSimulation settings:")
-    print(config["simulation"])
+    print("\nPayout summary:")
+    for payout in results["payouts"]:
+        print(
+            f"Account {payout.account_id} | "
+            f"Gross: {payout.gross_payout:.2f} | "
+            f"Net: {payout.net_payout:.2f}"
+        )
 
 
 if __name__ == "__main__":
