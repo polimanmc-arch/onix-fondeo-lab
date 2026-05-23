@@ -1,4 +1,5 @@
 from onix_fondeo.loader import load_all_configs, load_trades
+from onix_fondeo.report import export_results
 from onix_fondeo.simulator import simulate_funding
 
 
@@ -8,6 +9,7 @@ def main():
     trades = load_trades()
     config = load_all_configs()
     results = simulate_funding(trades, config)
+    exported_files = export_results(results)
 
     print("\nSimulation summary:")
     print(f"Total accounts: {len(results['accounts'])}")
@@ -33,6 +35,10 @@ def main():
             f"Gross: {payout.gross_payout:.2f} | "
             f"Net: {payout.net_payout:.2f}"
         )
+
+    print("\nExported files:")
+    for name, path in exported_files.items():
+        print(f"{name}: {path}")
 
 
 if __name__ == "__main__":
