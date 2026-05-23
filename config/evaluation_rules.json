@@ -1,0 +1,11 @@
+{
+  "account_size": 50000,
+  "evaluation_cost": 100,
+  "profit_target": 3000,
+  "max_drawdown": 2000,
+  "max_daily_loss": null,
+  "minimum_trading_days": 2,
+  "daily_profit_cap": 1300,
+  "consistency_enabled": true,
+  "consistency_percent": 0.5
+}
