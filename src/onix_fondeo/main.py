@@ -60,6 +60,9 @@ def main():
     for name, path in exported_files.items():
         print(f"{name}: {path}")
 
+    if "html_report" in exported_files:
+        print(f"\nHTML report: {exported_files['html_report']}")
+
 
 if __name__ == "__main__":
     main()
