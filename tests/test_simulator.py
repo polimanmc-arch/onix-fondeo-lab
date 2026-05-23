@@ -1,0 +1,67 @@
+from datetime import datetime
+
+import pandas as pd
+
+from onix_fondeo.simulator import simulate_funding
+
+
+def test_simulate_funding_returns_logs_and_creates_funded_account_on_pass():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 1500,
+            },
+            {
+                "TradeID": 2,
+                "EntryTime": datetime(2026, 5, 21, 9, 30),
+                "ExitTime": datetime(2026, 5, 21, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 1500,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "evaluation_cost": 100,
+            "profit_target": 3000,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_trading_days": 2,
+            "daily_profit_cap": None,
+            "consistency_enabled": True,
+            "consistency_percent": 0.5,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "mll_freeze_profit": 2100,
+            "minimum_withdrawable_profit": 2000,
+            "payout_trigger_profit": 4100,
+            "profit_split": 0.8,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": False,
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert set(results) == {"accounts", "trade_log", "payouts", "business_events"}
+    assert any(account.phase == "EVALUATION" for account in results["accounts"])
+    assert any(
+        event["type"] == "EVALUATION_COST"
+        for event in results["business_events"]
+    )
+    assert any(account.phase == "FUNDED" for account in results["accounts"])
