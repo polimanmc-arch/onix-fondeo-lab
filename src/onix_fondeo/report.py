@@ -98,6 +98,7 @@ def export_results(
     results: dict[str, Any],
     output_dir: str | Path = "data/output",
     metrics: dict[str, Any] | None = None,
+    presets: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -128,7 +129,12 @@ def export_results(
 
     if metrics is not None:
         file_paths["business_metrics"] = export_metrics(metrics, output_path)
-        file_paths["html_report"] = generate_html_report(results, metrics, output_path)
+        file_paths["html_report"] = generate_html_report(
+            results,
+            metrics,
+            output_path,
+            presets=presets,
+        )
 
     return file_paths
 
@@ -151,6 +157,7 @@ def generate_html_report(
     results: dict[str, Any],
     metrics: dict[str, Any],
     output_dir: str | Path = "data/output",
+    presets: list[dict[str, Any]] | None = None,
 ) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -314,6 +321,61 @@ def generate_html_report(
       height: auto;
       display: block;
     }}
+    .preset-grid {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+    }}
+    .preset-card {{
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #ffffff;
+    }}
+    .preset-title {{
+      margin: 0 0 2px;
+      font-size: 16px;
+      font-weight: 700;
+    }}
+    .preset-meta {{
+      margin: 0 0 10px;
+      color: #64748b;
+      font-size: 13px;
+    }}
+    .preset-row {{
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 6px;
+      font-size: 13px;
+    }}
+    .badge {{
+      display: inline-block;
+      margin: 8px 6px 0 0;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      color: #334155;
+      font-size: 12px;
+      font-weight: 700;
+    }}
+    .badge.good {{
+      background: #dcfce7;
+      color: #047857;
+    }}
+    .badge.warn {{
+      background: #fee2e2;
+      color: #b91c1c;
+    }}
+    .tag {{
+      display: inline-block;
+      margin: 8px 4px 0 0;
+      padding: 3px 7px;
+      border-radius: 6px;
+      background: #f1f5f9;
+      color: #475569;
+      font-size: 12px;
+    }}
   </style>
 </head>
 <body>
@@ -326,6 +388,11 @@ def generate_html_report(
       <div class="cards">
         {_metrics_cards_html(metrics)}
       </div>
+    </section>
+
+    <section>
+      <h2>Available Funding Presets</h2>
+      {_presets_catalog_html(presets or [])}
     </section>
 
     <section>
@@ -572,6 +639,70 @@ def _metrics_cards_html(metrics: dict[str, Any]) -> str:
             )
         )
     return "\n".join(cards)
+
+
+def _presets_catalog_html(presets: list[dict[str, Any]]) -> str:
+    if not presets:
+        return '<p class="empty">No funding presets available.</p>'
+
+    cards = []
+    for preset in presets:
+        is_official = bool(preset.get("is_official", False))
+        rules_verified = bool(preset.get("rules_verified", False))
+        is_runnable = bool(preset.get("is_runnable", False))
+        missing_fields = preset.get("missing_fields", [])
+
+        cards.append(
+            (
+                '<div class="preset-card">'
+                f'<h3 class="preset-title">{escape(str(preset.get("account_name", "")))}</h3>'
+                f'<p class="preset-meta">{escape(str(preset.get("company", "")))}'
+                f' | {escape(str(preset.get("plan", "")))}</p>'
+                f'{_preset_row_html("Account size", _format_account_size(preset.get("account_size")))}'
+                f'{_preset_row_html("Official status", "Official" if is_official else "Template")}'
+                f'{_preset_row_html("Rules status", "Verified" if rules_verified else "Not verified")}'
+                f'{_preset_row_html("Runnable", "Yes" if is_runnable else "No")}'
+                f'{_preset_row_html("Missing fields", str(len(missing_fields)))}'
+                f'{_badge_html("Official" if is_official else "Template", is_official)}'
+                f'{_badge_html("Verified" if rules_verified else "Not verified", rules_verified)}'
+                f'{_badge_html("Runnable" if is_runnable else "Not runnable", is_runnable)}'
+                f'{_missing_field_tags_html(missing_fields)}'
+                "</div>"
+            )
+        )
+
+    return f'<div class="preset-grid">{"".join(cards)}</div>'
+
+
+def _preset_row_html(label: str, value: str) -> str:
+    return (
+        '<div class="preset-row">'
+        f"<span>{escape(label)}</span>"
+        f"<strong>{escape(value)}</strong>"
+        "</div>"
+    )
+
+
+def _badge_html(label: str, is_good: bool) -> str:
+    css_class = "good" if is_good else "warn"
+    return f'<span class="badge {css_class}">{escape(label)}</span>'
+
+
+def _missing_field_tags_html(missing_fields: list[str]) -> str:
+    if not missing_fields:
+        return ""
+
+    tags = "".join(
+        f'<span class="tag">{escape(field_name)}</span>'
+        for field_name in missing_fields[:5]
+    )
+    return f"<div>{tags}</div>"
+
+
+def _format_account_size(value: Any) -> str:
+    if value is None:
+        return ""
+    return f"{int(value):,}"
 
 
 def _dataframe_table_html(

@@ -1,4 +1,9 @@
-from onix_fondeo.loader import load_all_configs, load_trades
+from onix_fondeo.loader import (
+    list_presets,
+    load_all_configs,
+    load_trades,
+    validate_preset_is_runnable,
+)
 from onix_fondeo.metrics import calculate_business_metrics
 from onix_fondeo.report import export_results
 from onix_fondeo.simulator import simulate_funding
@@ -11,7 +16,15 @@ def main():
     config = load_all_configs()
     results = simulate_funding(trades, config)
     metrics = calculate_business_metrics(results, config)
-    exported_files = export_results(results, metrics=metrics)
+    presets = []
+    for preset in list_presets():
+        is_runnable, missing_fields = validate_preset_is_runnable(preset)
+        preset_info = dict(preset)
+        preset_info["is_runnable"] = is_runnable
+        preset_info["missing_fields"] = missing_fields
+        presets.append(preset_info)
+
+    exported_files = export_results(results, metrics=metrics, presets=presets)
 
     print("\nSimulation summary:")
     print(f"Total accounts: {len(results['accounts'])}")
