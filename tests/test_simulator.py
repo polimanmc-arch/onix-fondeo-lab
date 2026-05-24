@@ -120,3 +120,53 @@ def test_simulate_funding_can_start_directly_with_funded_account():
     assert len(results["trade_log"]) == 2
     assert len(results["payouts"]) == 1
     assert all(event["type"] != "EVALUATION_COST" for event in results["business_events"])
+
+
+def test_simulate_funding_blocks_funded_payout_when_consistency_fails():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 5000,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 1000,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+        "metadata": {
+            "funded_consistency_enabled": True,
+            "funded_consistency_percent": 0.4,
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert results["accounts"][0].status == "ACTIVE"
+    assert len(results["payouts"]) == 0
+    assert results["trade_log"][0]["StatusAfterTrade"] == "ACTIVE"
+    assert (
+        results["trade_log"][0]["StatusReason"]
+        == "Funded consistency rule not satisfied"
+    )

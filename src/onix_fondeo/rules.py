@@ -66,7 +66,10 @@ def check_evaluation_status(
 def check_funded_status(
     account: Account,
     funded_rules: dict[str, Any],
+    metadata: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str | None]:
+    metadata = metadata or {}
+
     if not funded_rules.get("enabled", True):
         return "ACTIVE", None
 
@@ -76,10 +79,63 @@ def check_funded_status(
     if check_max_daily_loss(account, funded_rules.get("max_daily_loss")):
         return "FAILED", "Funded max daily loss breached"
 
-    if account.pnl >= funded_rules["payout_trigger_profit"]:
+    is_eligible, reasons = check_funded_payout_eligibility(
+        account,
+        funded_rules,
+        metadata,
+    )
+    if is_eligible:
         return "PAYOUT_ELIGIBLE", "Payout trigger reached"
 
+    if "Funded consistency rule not satisfied" in reasons:
+        return "ACTIVE", "Funded consistency rule not satisfied"
+
     return "ACTIVE", None
+
+
+def check_funded_consistency(
+    account: Account,
+    funded_rules: dict[str, Any],
+    metadata: dict[str, Any],
+) -> bool:
+    if metadata.get("funded_consistency_enabled") is not True:
+        return True
+
+    consistency_percent = metadata.get("funded_consistency_percent")
+    if consistency_percent is None:
+        progression = metadata.get("consistency_progression_post_2025_09_12")
+        if progression:
+            consistency_percent = progression[0]
+
+    if consistency_percent is None:
+        return True
+
+    if account.pnl <= 0:
+        return False
+    if not account.daily_pnl:
+        return False
+
+    best_day = max(account.daily_pnl.values())
+    consistency_ratio = best_day / account.pnl
+    return consistency_ratio <= consistency_percent
+
+
+def check_funded_payout_eligibility(
+    account: Account,
+    funded_rules: dict[str, Any],
+    metadata: dict[str, Any],
+) -> tuple[bool, list[str]]:
+    reasons = []
+
+    if account.pnl < funded_rules["payout_trigger_profit"]:
+        reasons.append("Payout trigger not reached")
+        return False, reasons
+
+    if not check_funded_consistency(account, funded_rules, metadata):
+        reasons.append("Funded consistency rule not satisfied")
+        return False, reasons
+
+    return True, reasons
 
 
 def process_funded_payout(

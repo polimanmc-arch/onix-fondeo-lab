@@ -26,6 +26,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
     evaluation_rules = config["evaluation"]
     funded_rules = config["funded"]
     simulation_settings = config["simulation"]
+    metadata = config.get("metadata", {})
 
     accounts: list[Account] = []
     trade_log: list[dict[str, Any]] = []
@@ -82,7 +83,9 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 active_eval.ended_at = trade.exit_time
                 active_eval.result_reason = reason
 
-            trade_log.append(_trade_log_row(active_eval, trade, applied_pnl, status))
+            trade_log.append(
+                _trade_log_row(active_eval, trade, applied_pnl, status, reason)
+            )
 
             if status == "PASSED":
                 funded_account = Account(
@@ -123,7 +126,11 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 continue
 
             applied_pnl = funded_account.apply_trade(trade)
-            status, reason = check_funded_status(funded_account, funded_rules)
+            status, reason = check_funded_status(
+                funded_account,
+                funded_rules,
+                metadata,
+            )
 
             if status == "FAILED":
                 funded_account.status = "FAILED"
@@ -147,7 +154,9 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     }
                 )
 
-            trade_log.append(_trade_log_row(funded_account, trade, applied_pnl, status))
+            trade_log.append(
+                _trade_log_row(funded_account, trade, applied_pnl, status, reason)
+            )
 
     return {
         "accounts": accounts,
@@ -222,6 +231,7 @@ def _trade_log_row(
     trade: Trade,
     applied_pnl: float,
     status_after_trade: str,
+    status_reason: Optional[str] = None,
 ) -> dict[str, Any]:
     return {
         "AccountID": account.account_id,
@@ -232,4 +242,5 @@ def _trade_log_row(
         "AppliedPnL": applied_pnl,
         "AccountPnL": account.pnl,
         "StatusAfterTrade": status_after_trade,
+        "StatusReason": status_reason,
     }

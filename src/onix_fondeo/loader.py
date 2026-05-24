@@ -96,6 +96,7 @@ def config_from_preset(preset: dict) -> dict:
         "evaluation": preset["evaluation"],
         "funded": preset["funded"],
         "simulation": preset["simulation"],
+        "metadata": preset.get("metadata", {}),
     }
 
 
