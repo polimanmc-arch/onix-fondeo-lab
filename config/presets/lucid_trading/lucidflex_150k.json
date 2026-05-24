@@ -5,36 +5,54 @@
   "account_name": "LucidFlex 150K",
   "account_type": "LucidFlex",
   "account_size": 150000,
-  "is_official": false,
-  "rules_verified": false,
-  "source_url": null,
-  "last_verified_at": null,
-  "notes": "Template only. Rules must be verified before real use.",
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://support.lucidtrading.com/en/articles/12945790-lucidflex-evaluation-account",
+  "source_urls": [
+    "https://support.lucidtrading.com/en/articles/12945790-lucidflex-evaluation-account",
+    "https://support.lucidtrading.com/en/articles/12945795-lucidflex-funded-account",
+    "https://support.lucidtrading.com/en/articles/12945796-lucidflex-payouts",
+    "https://support.lucidtrading.com/en/articles/12945805-lucidflex-consistency-percentage",
+    "https://support.lucidtrading.com/en/articles/12945815-lucidflex-drawdown"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Lucid Trading Help Center documentation summary consulted on 2026-05-23. Verify again before real-money use.",
   "evaluation": {
     "enabled": true,
     "account_size": 150000,
     "evaluation_cost": null,
-    "profit_target": null,
-    "max_drawdown": null,
+    "profit_target": 9000,
+    "max_drawdown": 4500,
     "max_daily_loss": null,
-    "minimum_trading_days": null,
+    "minimum_trading_days": 2,
     "daily_profit_cap": null,
-    "consistency_enabled": null,
-    "consistency_percent": null
+    "consistency_enabled": true,
+    "consistency_percent": 0.5
   },
   "funded": {
     "enabled": true,
-    "max_drawdown": null,
+    "max_drawdown": 4500,
     "max_daily_loss": null,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
-    "profit_split": null,
-    "reset_after_payout": null
+    "minimum_withdrawable_profit": 3000,
+    "payout_trigger_profit": 6000,
+    "profit_split": 0.9,
+    "reset_after_payout": false
   },
   "simulation": {
     "max_accounts": 100,
     "recycle_failed_accounts": true,
     "continue_after_pass": true
+  },
+  "metadata": {
+    "minimum_daily_profit": 250,
+    "payout_minimum": 500,
+    "payout_maximum": 3000,
+    "payout_rule": "50% of profit up to 3000",
+    "max_payouts_before_live": 5,
+    "drawdown_type": "EOD",
+    "initial_trail_balance": 154600,
+    "locked_mll_balance": 150100,
+    "max_size": "10 mini or 100 micros"
   }
 }
