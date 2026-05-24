@@ -76,6 +76,10 @@ def _args(**overrides) -> Namespace:
         "stoch_d_period": 3,
         "stoch_oversold": 20,
         "stoch_overbought": 80,
+        "stoch_signal_mode": "cross",
+        "stoch_use_d_confirmation": False,
+        "stoch_min_k_d_gap": 0.0,
+        "stoch_cooldown_bars": 0,
         "strategy_start_time": None,
         "strategy_end_time": None,
     }

@@ -152,6 +152,18 @@ Customize stop loss and take profit:
 PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy stochastic --preset tradeify_growth_50k --stop-loss-points 25 --take-profit-points 50
 ```
 
+Run stochastic cross mode:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/sample_NQ_1m.csv --strategy stochastic --stoch-signal-mode cross --preset tradeify_growth_50k
+```
+
+Run stochastic zone mode with %D confirmation:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/sample_NQ_1m.csv --strategy stochastic --stoch-signal-mode zone --stoch-use-d-confirmation --stoch-min-k-d-gap 2 --stoch-cooldown-bars 5 --preset tradeify_growth_50k
+```
+
 Compare multiple presets:
 
 ```bash

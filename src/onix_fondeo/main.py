@@ -214,6 +214,29 @@ def parse_args() -> argparse.Namespace:
         help="Stochastic overbought level.",
     )
     parser.add_argument(
+        "--stoch-signal-mode",
+        choices=["cross", "zone"],
+        default="cross",
+        help="Stochastic signal mode.",
+    )
+    parser.add_argument(
+        "--stoch-use-d-confirmation",
+        action="store_true",
+        help="Require stochastic %%K/%%D confirmation.",
+    )
+    parser.add_argument(
+        "--stoch-min-k-d-gap",
+        type=float,
+        default=0.0,
+        help="Minimum %%K/%%D gap when D confirmation is enabled.",
+    )
+    parser.add_argument(
+        "--stoch-cooldown-bars",
+        type=int,
+        default=0,
+        help="Bars to skip after each stochastic signal.",
+    )
+    parser.add_argument(
         "--strategy-start-time",
         help='Optional strategy start time, for example "09:30".',
     )
@@ -243,6 +266,10 @@ def build_strategy_from_args(args: argparse.Namespace):
             overbought_level=args.stoch_overbought,
             start_time=args.strategy_start_time,
             end_time=args.strategy_end_time,
+            signal_mode=args.stoch_signal_mode,
+            use_d_confirmation=args.stoch_use_d_confirmation,
+            min_k_d_gap=args.stoch_min_k_d_gap,
+            cooldown_bars=args.stoch_cooldown_bars,
         )
 
     raise ValueError(f"Unsupported strategy: {strategy_name}")
