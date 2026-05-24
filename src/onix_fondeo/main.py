@@ -30,7 +30,7 @@ def main():
         print_presets()
         return
 
-    trades = load_or_generate_trades(args)
+    trades, strategy_metrics = load_or_generate_trades(args)
 
     if args.compare:
         run_comparison(args.compare, trades)
@@ -51,7 +51,12 @@ def main():
         preset_info["missing_fields"] = missing_fields
         presets.append(preset_info)
 
-    exported_files = export_results(results, metrics=metrics, presets=presets)
+    exported_files = export_results(
+        results,
+        metrics=metrics,
+        presets=presets,
+        strategy_metrics=strategy_metrics,
+    )
 
     print("\nSimulation summary:")
     print(f"Total accounts: {len(results['accounts'])}")
@@ -245,7 +250,7 @@ def build_strategy_from_args(args: argparse.Namespace):
 
 def load_or_generate_trades(args: argparse.Namespace):
     if not args.market_data:
-        return load_trades(args.trades)
+        return load_trades(args.trades), None
 
     ohlc = load_ohlc_data(args.market_data, symbol=args.symbol)
     strategy = build_strategy_from_args(args)
@@ -283,7 +288,7 @@ def load_or_generate_trades(args: argparse.Namespace):
     print(f"Profit factor: {_format_metric(strategy_metrics['profit_factor'])}")
     print(f"Strategy metrics JSON: {strategy_metrics_path}")
 
-    return trades
+    return trades, strategy_metrics
 
 
 def _format_metric(value: float) -> str:

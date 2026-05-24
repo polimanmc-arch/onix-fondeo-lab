@@ -126,6 +126,7 @@ def export_results(
     output_dir: str | Path = "data/output",
     metrics: dict[str, Any] | None = None,
     presets: list[dict[str, Any]] | None = None,
+    strategy_metrics: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -161,6 +162,7 @@ def export_results(
             metrics,
             output_path,
             presets=presets,
+            strategy_metrics=strategy_metrics,
         )
 
     return file_paths
@@ -491,6 +493,7 @@ def generate_html_report(
     metrics: dict[str, Any],
     output_dir: str | Path = "data/output",
     presets: list[dict[str, Any]] | None = None,
+    strategy_metrics: dict[str, Any] | None = None,
 ) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -772,6 +775,8 @@ def generate_html_report(
     <h1>Onix Fondeo Lab - Simulation Report</h1>
     <p class="timestamp">Generated: {escape(generated_at)}</p>
 
+    {_strategy_summary_section_html(strategy_metrics)}
+
     <section>
       <h2>Business Metrics</h2>
       <div class="cards">
@@ -1031,6 +1036,65 @@ def _metrics_cards_html(metrics: dict[str, Any]) -> str:
     return "\n".join(cards)
 
 
+def _strategy_summary_section_html(
+    strategy_metrics: dict[str, Any] | None,
+) -> str:
+    if strategy_metrics is None:
+        return ""
+
+    summary_items = [
+        ("Total Trades", strategy_metrics.get("total_trades", 0), "number"),
+        ("Win Rate", strategy_metrics.get("win_rate", 0.0), "percent"),
+        ("Net PnL", strategy_metrics.get("net_pnl", 0.0), "money"),
+        ("Profit Factor", strategy_metrics.get("profit_factor", 0.0), "ratio"),
+        ("Average Trade", strategy_metrics.get("average_trade", 0.0), "money"),
+        ("Best Trade", strategy_metrics.get("best_trade", 0.0), "money"),
+        ("Worst Trade", strategy_metrics.get("worst_trade", 0.0), "money"),
+        (
+            "Average Holding Minutes",
+            strategy_metrics.get("average_holding_minutes", 0.0),
+            "decimal",
+        ),
+    ]
+    exit_items = [
+        ("TP Exits", strategy_metrics.get("tp_exits", 0)),
+        ("SL Exits", strategy_metrics.get("sl_exits", 0)),
+        ("Time Exits", strategy_metrics.get("time_exits", 0)),
+        ("End of Data Exits", strategy_metrics.get("end_of_data_exits", 0)),
+    ]
+
+    summary_cards = "\n".join(
+        _metric_card_html(label, value, value_type)
+        for label, value, value_type in summary_items
+    )
+    exit_cards = "\n".join(
+        _metric_card_html(label, value, "number") for label, value in exit_items
+    )
+
+    return f"""
+    <section>
+      <h2>Strategy Summary</h2>
+      <div class="cards">
+        {summary_cards}
+      </div>
+      <h2>Strategy Exit Reasons</h2>
+      <div class="cards">
+        {exit_cards}
+      </div>
+    </section>
+"""
+
+
+def _metric_card_html(label: str, value: Any, value_type: str) -> str:
+    return (
+        '<div class="card">'
+        f'<div class="card-label">{escape(label)}</div>'
+        f'<div class="card-value {_number_class(value)}">'
+        f"{_format_metric_value(value, value_type)}"
+        "</div></div>"
+    )
+
+
 def _presets_catalog_html(presets: list[dict[str, Any]]) -> str:
     if not presets:
         return '<p class="empty">No funding presets available.</p>'
@@ -1262,6 +1326,12 @@ def _format_metric_value(value: Any, value_type: str) -> str:
         return escape(format_percent(float(value)))
     if value_type == "money":
         return escape(format_currency(float(value)))
+    if value_type == "ratio":
+        if value == float("inf"):
+            return "inf"
+        return escape(f"{float(value):.2f}")
+    if value_type == "decimal":
+        return escape(f"{float(value):.2f}")
     return escape(str(value))
 
 

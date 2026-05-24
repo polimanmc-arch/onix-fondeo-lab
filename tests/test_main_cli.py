@@ -49,9 +49,10 @@ def test_load_or_generate_trades_uses_market_data(tmp_path: Path):
         random_probability=1.0,
     )
 
-    trades = load_or_generate_trades(args)
+    trades, strategy_metrics = load_or_generate_trades(args)
 
     assert len(trades) == 1
+    assert strategy_metrics["total_trades"] == 1
     assert {"TradeID", "EntryTime", "ExitTime", "NetPnL"}.issubset(trades.columns)
     assert Path("data/output/generated_trades.csv").exists()
 

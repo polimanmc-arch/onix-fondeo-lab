@@ -96,7 +96,8 @@ When `--market-data` is used, the generated strategy trades are exported to:
 
 Strategy metrics describe the raw generated trades before funding rules are
 applied. They are separate from funding metrics such as evaluation cost, pass
-rate, payout rate, and business PnL.
+rate, payout rate, and business PnL. When trades are generated from market data,
+`data/output/report.html` also includes a Strategy Summary section.
 
 ## How To Install
 
