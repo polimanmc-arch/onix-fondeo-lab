@@ -89,6 +89,15 @@ TradeID, EntryTime, ExitTime, Symbol, Direction, Quantity, NetPnL
 That means OHLC-generated trades can be passed into the existing funding
 simulator without changing the funding simulation engine.
 
+When `--market-data` is used, the generated strategy trades are exported to:
+
+- `data/output/generated_trades.csv`
+- `data/output/strategy_metrics.json`
+
+Strategy metrics describe the raw generated trades before funding rules are
+applied. They are separate from funding metrics such as evaluation cost, pass
+rate, payout rate, and business PnL.
+
 ## How To Install
 
 ```bash
