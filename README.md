@@ -62,6 +62,33 @@ Simulation results are exported to:
 - `data/output/business_events.csv`
 - `data/output/business_metrics.json`
 
+## OHLC Backtesting Layer
+
+Onix Fondeo Lab can also generate trades from 1-minute OHLC market data before
+passing those trades into the funding simulator.
+
+The OHLC input format is documented in:
+
+```text
+docs/market_data_format.md
+```
+
+Current strategies:
+
+- Random Entry Strategy: a reproducible benchmark strategy that creates random
+  long/short entries.
+- Stochastic Level Strategy: a simple logic-based strategy using stochastic
+  oscillator level crosses.
+
+Generated trades use the same key columns as the existing trade CSV workflow:
+
+```text
+TradeID, EntryTime, ExitTime, Symbol, Direction, Quantity, NetPnL
+```
+
+That means OHLC-generated trades can be passed into the existing funding
+simulator without changing the funding simulation engine.
+
 ## How To Install
 
 ```bash
