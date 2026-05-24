@@ -12,7 +12,7 @@
     "https://help.tradeify.co/en/"
   ],
   "last_verified_at": "2026-05-23",
-  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Current simulator uses an approximation for Lightning payouts. Verify again before real-money use.",
   "evaluation": {
     "enabled": false,
     "account_size": 150000,
@@ -30,7 +30,7 @@
     "max_drawdown": 5000,
     "max_daily_loss": 3750,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
+    "minimum_withdrawable_profit": 7500,
     "payout_trigger_profit": 7500,
     "profit_split": 0.9,
     "reset_after_payout": false
@@ -45,12 +45,6 @@
     "initial_profit_goal": 7500,
     "straight_to_funded": true,
     "no_resets_available": true,
-    "consistency_progression_post_2025_12_09": [
-      0.2,
-      0.25,
-      0.3
-    ],
-    "legacy_consistency_pre_2025_12_09": 0.2,
     "profit_split": 0.9,
     "payout_minimum": 500,
     "no_minimum_trading_day_count": true,
@@ -75,6 +69,15 @@
       "Sierra Chart",
       "R|Trader",
       "WealthCharts"
-    ]
+    ],
+    "consistency_progression_post_2025_09_12": [
+      0.2,
+      0.25,
+      0.3
+    ],
+    "legacy_consistency_pre_2025_09_12": 0.2,
+    "source_basis": "Tradeify Help Center documentation compiled May 2026",
+    "simulation_approximation": true,
+    "simulation_approximation_notes": "Current engine uses the initial profit goal as both payout trigger and gross payout amount. It does not yet fully simulate progressive consistency, payout cycle progression, or later payout rules."
   }
 }
