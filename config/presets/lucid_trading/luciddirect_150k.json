@@ -5,11 +5,19 @@
   "account_name": "LucidDirect 150K",
   "account_type": "LucidDirect",
   "account_size": 150000,
-  "is_official": false,
-  "rules_verified": false,
-  "source_url": null,
-  "last_verified_at": null,
-  "notes": "Template only. Rules must be verified before real use.",
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://support.lucidtrading.com/en/articles/12890148-luciddirect-funded-account",
+  "source_urls": [
+    "https://support.lucidtrading.com/en/articles/12890148-luciddirect-funded-account",
+    "https://support.lucidtrading.com/en/articles/12890164-luciddirect-payout-objectives",
+    "https://support.lucidtrading.com/en/articles/12890178-luciddirect-consistency-percentage",
+    "https://support.lucidtrading.com/en/articles/12890185-luciddirect-daily-loss-limit",
+    "https://support.lucidtrading.com/en/articles/12890192-luciddirect-drawdown",
+    "https://support.lucidtrading.com/en/articles/13425070-luciddirect-live-legacy"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Lucid Trading Help Center documentation summary consulted on 2026-05-23. Verify again before real-money use.",
   "evaluation": {
     "enabled": false,
     "account_size": 150000,
@@ -24,17 +32,34 @@
   },
   "funded": {
     "enabled": true,
-    "max_drawdown": null,
-    "max_daily_loss": null,
+    "max_drawdown": 5000,
+    "max_daily_loss": 3000,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
-    "profit_split": null,
-    "reset_after_payout": null
+    "minimum_withdrawable_profit": 3000,
+    "payout_trigger_profit": 9000,
+    "profit_split": 0.9,
+    "reset_after_payout": false
   },
   "simulation": {
     "max_accounts": 100,
     "recycle_failed_accounts": true,
     "continue_after_pass": true
+  },
+  "metadata": {
+    "straight_to_funded": true,
+    "payout_profit_goal_1": 9000,
+    "payout_profit_goal_2_plus": 4500,
+    "payout_minimum": 500,
+    "payouts_1_to_3_maximum": 3000,
+    "payouts_4_to_5_maximum": 3500,
+    "funded_consistency_enabled": true,
+    "funded_consistency_percent": 0.2,
+    "drawdown_type": "EOD",
+    "initial_trail_balance": 156100,
+    "locked_mll_balance": 150100,
+    "max_size": "10 mini or 100 micros",
+    "scaling_plan": false,
+    "dll_type": "fixed_then_lucidscale",
+    "lucidscale_dll_percent": 0.6
   }
 }
