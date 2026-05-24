@@ -1,0 +1,45 @@
+{
+  "preset_id": "earn2trade_25k",
+  "company": "Earn2Trade",
+  "plan": "Template",
+  "account_name": "Earn2Trade 25K",
+  "account_type": "Template",
+  "account_size": 25000,
+  "is_official": false,
+  "rules_verified": false,
+  "source_url": null,
+  "source_urls": [],
+  "last_verified_at": null,
+  "notes": "Template only. Rules must be verified from official company documentation before real use.",
+  "evaluation": {
+    "enabled": true,
+    "account_size": 25000,
+    "evaluation_cost": null,
+    "profit_target": null,
+    "max_drawdown": null,
+    "max_daily_loss": null,
+    "minimum_trading_days": null,
+    "daily_profit_cap": null,
+    "consistency_enabled": null,
+    "consistency_percent": null
+  },
+  "funded": {
+    "enabled": true,
+    "max_drawdown": null,
+    "max_daily_loss": null,
+    "mll_freeze_profit": null,
+    "minimum_withdrawable_profit": null,
+    "payout_trigger_profit": null,
+    "profit_split": null,
+    "reset_after_payout": null
+  },
+  "simulation": {
+    "max_accounts": 100,
+    "recycle_failed_accounts": true,
+    "continue_after_pass": true
+  },
+  "metadata": {
+    "template_status": "unverified",
+    "requires_documentation": true
+  }
+}
