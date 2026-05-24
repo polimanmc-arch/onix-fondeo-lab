@@ -65,3 +65,58 @@ def test_simulate_funding_returns_logs_and_creates_funded_account_on_pass():
         for event in results["business_events"]
     )
     assert any(account.phase == "FUNDED" for account in results["accounts"])
+
+
+def test_simulate_funding_can_start_directly_with_funded_account():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 500,
+            },
+            {
+                "TradeID": 2,
+                "EntryTime": datetime(2026, 5, 21, 9, 30),
+                "ExitTime": datetime(2026, 5, 21, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 600,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 1000,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert all(account.phase != "EVALUATION" for account in results["accounts"])
+    assert len(results["accounts"]) == 1
+    assert results["accounts"][0].phase == "FUNDED"
+    assert results["accounts"][0].trades_count == 2
+    assert len(results["trade_log"]) == 2
+    assert len(results["payouts"]) == 1
+    assert all(event["type"] != "EVALUATION_COST" for event in results["business_events"])

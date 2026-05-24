@@ -37,7 +37,7 @@ def calculate_business_metrics(
     total_gross_payout = sum(payout.gross_payout for payout in payouts)
     total_net_payout = sum(payout.net_payout for payout in payouts)
 
-    evaluation_cost = config["evaluation"]["evaluation_cost"]
+    evaluation_cost = config["evaluation"].get("evaluation_cost") or 0
     total_evaluation_cost = total_evaluations * evaluation_cost
     net_business_pnl = total_net_payout - total_evaluation_cost
 
