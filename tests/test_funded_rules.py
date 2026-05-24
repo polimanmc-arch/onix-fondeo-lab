@@ -4,6 +4,9 @@ from onix_fondeo.models import Account
 from onix_fondeo.rules import (
     check_funded_payout_eligibility,
     check_funded_status,
+    check_winning_days_requirement,
+    count_winning_days,
+    get_required_winning_days,
     process_funded_payout,
 )
 
@@ -165,3 +168,91 @@ def test_consistency_failure_does_not_fail_funded_account():
     status, _ = check_funded_status(account, funded_rules(), metadata)
 
     assert status != "FAILED"
+
+
+def test_no_winning_days_requirement_does_not_block_payout():
+    account = Account(account_id=1, phase="FUNDED", pnl=4100)
+
+    is_eligible, reasons = check_funded_payout_eligibility(
+        account,
+        funded_rules(),
+        metadata={},
+    )
+
+    assert is_eligible is True
+    assert reasons == []
+
+
+def test_winning_days_requirement_is_satisfied_with_threshold():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=5000,
+        daily_pnl={
+            date(2026, 5, 18): 150,
+            date(2026, 5, 19): 200,
+            date(2026, 5, 20): 175,
+            date(2026, 5, 21): 300,
+            date(2026, 5, 22): 250,
+        },
+    )
+    metadata = {
+        "minimum_winning_days": 5,
+        "winning_day_threshold": 150,
+    }
+
+    is_eligible, reasons = check_funded_payout_eligibility(
+        account,
+        funded_rules(),
+        metadata,
+    )
+
+    assert is_eligible is True
+    assert reasons == []
+
+
+def test_winning_days_requirement_blocks_payout_without_failing_account():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=5000,
+        daily_pnl={
+            date(2026, 5, 18): 150,
+            date(2026, 5, 19): 200,
+            date(2026, 5, 20): 175,
+            date(2026, 5, 21): 100,
+            date(2026, 5, 22): -50,
+        },
+    )
+    metadata = {
+        "minimum_winning_days": 5,
+        "winning_day_threshold": 150,
+    }
+
+    status, reason = check_funded_status(account, funded_rules(), metadata)
+
+    assert status == "ACTIVE"
+    assert reason == "Winning days requirement not satisfied: 3/5"
+
+
+def test_winning_days_threshold_none_counts_positive_days():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=5000,
+        daily_pnl={
+            date(2026, 5, 18): 100,
+            date(2026, 5, 19): -50,
+            date(2026, 5, 20): 25,
+        },
+    )
+    metadata = {"winning_days_required": 2}
+
+    required_days, threshold = get_required_winning_days(metadata)
+    is_satisfied, reason = check_winning_days_requirement(account, metadata)
+
+    assert required_days == 2
+    assert threshold is None
+    assert count_winning_days(account, threshold) == 2
+    assert is_satisfied is True
+    assert reason is None

@@ -90,7 +90,24 @@ def check_funded_status(
     if "Funded consistency rule not satisfied" in reasons:
         return "ACTIVE", "Funded consistency rule not satisfied"
 
+    winning_days_reason = _first_reason_starting_with(
+        reasons,
+        "Winning days requirement not satisfied",
+    )
+    if winning_days_reason is not None:
+        return "ACTIVE", winning_days_reason
+
     return "ACTIVE", None
+
+
+def _first_reason_starting_with(
+    reasons: list[str],
+    prefix: str,
+) -> str | None:
+    for reason in reasons:
+        if reason.startswith(prefix):
+            return reason
+    return None
 
 
 def check_funded_consistency(
@@ -120,6 +137,80 @@ def check_funded_consistency(
     return consistency_ratio <= consistency_percent
 
 
+def get_required_winning_days(
+    metadata: dict[str, Any],
+) -> tuple[int | None, float | None]:
+    required_day_keys = [
+        "funded_minimum_trading_days_with_profit",
+        "minimum_winning_days",
+        "minimum_trading_days_with_profit",
+        "winning_days_required",
+        "payout_minimum_winning_days",
+    ]
+    threshold_keys = [
+        "minimum_daily_profit",
+        "minimum_daily_profit_for_payout_day",
+        "winning_day_threshold",
+        "minimum_profit_per_winning_day",
+    ]
+
+    required_days = _first_metadata_value(metadata, required_day_keys)
+    if required_days is None:
+        return None, None
+
+    threshold = _first_metadata_value(metadata, threshold_keys)
+    return int(required_days), _optional_float(threshold)
+
+
+def count_winning_days(
+    account: Account,
+    threshold: Optional[float],
+) -> int:
+    if threshold is None:
+        return sum(1 for daily_pnl in account.daily_pnl.values() if daily_pnl > 0)
+
+    return sum(
+        1
+        for daily_pnl in account.daily_pnl.values()
+        if daily_pnl >= threshold
+    )
+
+
+def check_winning_days_requirement(
+    account: Account,
+    metadata: dict[str, Any],
+) -> tuple[bool, str | None]:
+    required_days, threshold = get_required_winning_days(metadata)
+    if required_days is None:
+        return True, None
+
+    winning_days = count_winning_days(account, threshold)
+    if winning_days >= required_days:
+        return True, None
+
+    return (
+        False,
+        f"Winning days requirement not satisfied: {winning_days}/{required_days}",
+    )
+
+
+def _first_metadata_value(
+    metadata: dict[str, Any],
+    keys: list[str],
+) -> Any:
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            return value
+    return None
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
+
+
 def check_funded_payout_eligibility(
     account: Account,
     funded_rules: dict[str, Any],
@@ -133,6 +224,14 @@ def check_funded_payout_eligibility(
 
     if not check_funded_consistency(account, funded_rules, metadata):
         reasons.append("Funded consistency rule not satisfied")
+        return False, reasons
+
+    winning_days_ok, winning_days_reason = check_winning_days_requirement(
+        account,
+        metadata,
+    )
+    if not winning_days_ok:
+        reasons.append(str(winning_days_reason))
         return False, reasons
 
     return True, reasons
