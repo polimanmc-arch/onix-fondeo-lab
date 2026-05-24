@@ -113,16 +113,21 @@ def validate_preset_is_runnable(preset: dict) -> tuple[bool, list[str]]:
                 section_name="evaluation",
                 section=evaluation,
                 required_fields=[
-                    "evaluation_cost",
                     "profit_target",
                     "max_drawdown",
                     "minimum_trading_days",
-                    "daily_profit_cap",
                     "consistency_enabled",
-                    "consistency_percent",
                 ],
             )
         )
+        if evaluation.get("consistency_enabled") is True:
+            missing_fields.extend(
+                _missing_required_fields(
+                    section_name="evaluation",
+                    section=evaluation,
+                    required_fields=["consistency_percent"],
+                )
+            )
 
     if funded.get("enabled", True):
         missing_fields.extend(

@@ -5,36 +5,59 @@
   "account_name": "LucidPro 25K",
   "account_type": "LucidPro",
   "account_size": 25000,
-  "is_official": false,
-  "rules_verified": false,
-  "source_url": null,
-  "last_verified_at": null,
-  "notes": "Template only. Rules must be verified before real use.",
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://support.lucidtrading.com/en/articles/12890029-lucidpro-evaluation-account",
+  "source_urls": [
+    "https://support.lucidtrading.com/en/articles/12890029-lucidpro-evaluation-account",
+    "https://support.lucidtrading.com/en/articles/12890069-lucidpro-funded-account",
+    "https://support.lucidtrading.com/en/articles/12890092-lucidpro-payouts",
+    "https://support.lucidtrading.com/en/articles/12890109-lucidpro-consistency-percentage",
+    "https://support.lucidtrading.com/en/articles/12890122-lucidpro-daily-loss-limit",
+    "https://support.lucidtrading.com/en/articles/12890136-lucidpro-drawdown"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Lucid Trading Help Center documentation summary consulted on 2026-05-23. Verify again before real-money use.",
   "evaluation": {
     "enabled": true,
     "account_size": 25000,
     "evaluation_cost": null,
-    "profit_target": null,
-    "max_drawdown": null,
+    "profit_target": 1250,
+    "max_drawdown": 1000,
     "max_daily_loss": null,
-    "minimum_trading_days": null,
+    "minimum_trading_days": 1,
     "daily_profit_cap": null,
-    "consistency_enabled": null,
+    "consistency_enabled": false,
     "consistency_percent": null
   },
   "funded": {
     "enabled": true,
-    "max_drawdown": null,
+    "max_drawdown": 1000,
     "max_daily_loss": null,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
-    "profit_split": null,
-    "reset_after_payout": null
+    "minimum_withdrawable_profit": 1000,
+    "payout_trigger_profit": 1250,
+    "profit_split": 0.9,
+    "reset_after_payout": false
   },
   "simulation": {
     "max_accounts": 100,
     "recycle_failed_accounts": true,
     "continue_after_pass": true
+  },
+  "metadata": {
+    "minimum_profit_goal": 250,
+    "buffer_balance": 26100,
+    "payout_minimum": 500,
+    "payout_1_maximum": 1000,
+    "payout_2_plus_maximum": 1500,
+    "funded_consistency_enabled": true,
+    "funded_consistency_percent": 0.4,
+    "drawdown_type": "EOD",
+    "initial_trail_balance": 26100,
+    "locked_mll_balance": 25100,
+    "max_size": "2 mini or 20 micros",
+    "scaling_plan": false,
+    "dll_type": "none"
   }
 }

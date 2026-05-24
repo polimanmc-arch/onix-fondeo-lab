@@ -34,14 +34,37 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
     active_funded_accounts: list[Account] = []
 
     next_account_id = 1
-    active_eval = _open_evaluation_account(
-        account_id=next_account_id,
-        opened_at=None,
-        evaluation_cost=evaluation_rules["evaluation_cost"],
-        accounts=accounts,
-        business_events=business_events,
-    )
-    next_account_id += 1
+
+    # Evaluation flow: start with one evaluation account and pay its cost if known.
+    if evaluation_rules.get("enabled", True):
+        active_eval = _open_evaluation_account(
+            account_id=next_account_id,
+            opened_at=None,
+            evaluation_cost=evaluation_rules.get("evaluation_cost"),
+            accounts=accounts,
+            business_events=business_events,
+        )
+        next_account_id += 1
+    else:
+        active_eval = None
+        # Straight-to-funded flow: skip evaluation and start with one funded account.
+        funded_account = Account(
+            account_id=next_account_id,
+            phase="FUNDED",
+            started_at=None,
+        )
+        accounts.append(funded_account)
+        active_funded_accounts.append(funded_account)
+        _register_account_cost(
+            account_id=funded_account.account_id,
+            opened_at=None,
+            account_cost=(
+                funded_rules.get("account_cost")
+                or evaluation_rules.get("evaluation_cost")
+            ),
+            business_events=business_events,
+        )
+        next_account_id += 1
 
     for _, row in trades_df.iterrows():
         trade = row_to_trade(row)
@@ -74,7 +97,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     should_open=simulation_settings.get("continue_after_pass", False),
                     next_account_id=next_account_id,
                     opened_at=trade.exit_time,
-                    evaluation_cost=evaluation_rules["evaluation_cost"],
+                    evaluation_cost=evaluation_rules.get("evaluation_cost"),
                     max_accounts=simulation_settings.get("max_accounts"),
                     accounts=accounts,
                     business_events=business_events,
@@ -87,7 +110,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     should_open=simulation_settings.get("recycle_failed_accounts", False),
                     next_account_id=next_account_id,
                     opened_at=trade.exit_time,
-                    evaluation_cost=evaluation_rules["evaluation_cost"],
+                    evaluation_cost=evaluation_rules.get("evaluation_cost"),
                     max_accounts=simulation_settings.get("max_accounts"),
                     accounts=accounts,
                     business_events=business_events,
@@ -137,28 +160,45 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
 def _open_evaluation_account(
     account_id: int,
     opened_at: Any,
-    evaluation_cost: float,
+    evaluation_cost: Optional[float],
     accounts: list[Account],
     business_events: list[dict[str, Any]],
 ) -> Account:
     account = Account(account_id=account_id, phase="EVALUATION", started_at=opened_at)
     accounts.append(account)
+    _register_account_cost(
+        account_id=account_id,
+        opened_at=opened_at,
+        account_cost=evaluation_cost,
+        business_events=business_events,
+    )
+    return account
+
+
+def _register_account_cost(
+    account_id: int,
+    opened_at: Any,
+    account_cost: Optional[float],
+    business_events: list[dict[str, Any]],
+) -> None:
+    if account_cost is None:
+        return
+
     business_events.append(
         {
             "time": opened_at,
             "type": "EVALUATION_COST",
-            "amount": -evaluation_cost,
+            "amount": -account_cost,
             "account_id": account_id,
         }
     )
-    return account
 
 
 def _maybe_open_next_evaluation(
     should_open: bool,
     next_account_id: int,
     opened_at: Any,
-    evaluation_cost: float,
+    evaluation_cost: Optional[float],
     max_accounts: Optional[int],
     accounts: list[Account],
     business_events: list[dict[str, Any]],
