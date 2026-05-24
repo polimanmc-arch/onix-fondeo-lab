@@ -12,11 +12,11 @@
     "https://help.tradeify.co/en/"
   ],
   "last_verified_at": "2026-05-23",
-  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026 and completed with manually verified Growth pricing/payout values provided by the user. Verify again before real-money use.",
   "evaluation": {
     "enabled": true,
     "account_size": 100000,
-    "evaluation_cost": null,
+    "evaluation_cost": 153,
     "profit_target": 6000,
     "max_drawdown": 3500,
     "max_daily_loss": 2500,
@@ -30,8 +30,8 @@
     "max_drawdown": 3500,
     "max_daily_loss": 2500,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
+    "minimum_withdrawable_profit": 2000,
+    "payout_trigger_profit": 4500,
     "profit_split": 0.9,
     "reset_after_payout": false
   },
@@ -67,6 +67,23 @@
       "Sierra Chart",
       "R|Trader",
       "WealthCharts"
-    ]
+    ],
+    "minimum_daily_profit_for_payout_day": 200,
+    "min_balance_needed_current": 104500,
+    "payout_minimum": 1000,
+    "payout_tiers": {
+      "1": 2000,
+      "2": 2500,
+      "3": 3000,
+      "4_plus": 4000
+    },
+    "current_rules_apply_after": "2025-09-12T08:00:00-05:00",
+    "legacy_pre_2025_09_12_min_balance_needed": {
+      "50000": 52100,
+      "100000": 103600,
+      "150000": 155100
+    },
+    "simulation_approximation": true,
+    "simulation_approximation_notes": "Current engine uses the current minimum balance requirement minus account size as payout trigger and the first payout maximum as the gross payout amount. It does not yet fully simulate 35% funded consistency, five profitable trading days, or payout tier progression."
   }
 }
