@@ -1,5 +1,7 @@
 import argparse
+from pathlib import Path
 
+from onix_fondeo.backtester import backtest_strategy
 from onix_fondeo.loader import (
     config_from_preset,
     list_presets,
@@ -8,9 +10,12 @@ from onix_fondeo.loader import (
     load_trades,
     validate_preset_is_runnable,
 )
+from onix_fondeo.market_data import load_ohlc_data
 from onix_fondeo.metrics import calculate_business_metrics
 from onix_fondeo.report import export_comparison_results, export_results
 from onix_fondeo.simulator import simulate_funding
+from onix_fondeo.strategies.random_entry import RandomEntryStrategy
+from onix_fondeo.strategies.stochastic_level import StochasticLevelStrategy
 
 
 def main():
@@ -21,7 +26,7 @@ def main():
         print_presets()
         return
 
-    trades = load_trades(args.trades)
+    trades = load_or_generate_trades(args)
 
     if args.compare:
         run_comparison(args.compare, trades)
@@ -117,7 +122,155 @@ def parse_args() -> argparse.Namespace:
         default="data/input/sample_trades.csv",
         help="Trades CSV path.",
     )
+    parser.add_argument(
+        "--market-data",
+        help="OHLC CSV path. If provided, trades are generated from market data.",
+    )
+    parser.add_argument(
+        "--strategy",
+        choices=["random", "stochastic"],
+        help="Strategy to use with --market-data. Defaults to random.",
+    )
+    parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
+    parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
+    parser.add_argument(
+        "--point-value",
+        type=float,
+        default=20.0,
+        help="Dollar value per point.",
+    )
+    parser.add_argument(
+        "--stop-loss-points",
+        type=float,
+        default=30.0,
+        help="Stop loss in points.",
+    )
+    parser.add_argument(
+        "--take-profit-points",
+        type=float,
+        default=45.0,
+        help="Take profit in points.",
+    )
+    parser.add_argument(
+        "--max-holding-minutes",
+        type=int,
+        default=60,
+        help="Maximum trade holding time in minutes.",
+    )
+    parser.add_argument(
+        "--commission-per-side",
+        type=float,
+        default=0.0,
+        help="Commission per side per contract.",
+    )
+    parser.add_argument(
+        "--same-bar-exit-policy",
+        default="conservative",
+        help="Policy when SL and TP are touched in the same bar.",
+    )
+    parser.add_argument(
+        "--random-probability",
+        type=float,
+        default=0.005,
+        help="Random strategy signal probability per bar.",
+    )
+    parser.add_argument(
+        "--random-seed",
+        type=int,
+        default=42,
+        help="Random strategy seed.",
+    )
+    parser.add_argument(
+        "--stoch-k-period",
+        type=int,
+        default=14,
+        help="Stochastic %%K period.",
+    )
+    parser.add_argument(
+        "--stoch-d-period",
+        type=int,
+        default=3,
+        help="Stochastic %%D period.",
+    )
+    parser.add_argument(
+        "--stoch-oversold",
+        type=float,
+        default=20,
+        help="Stochastic oversold level.",
+    )
+    parser.add_argument(
+        "--stoch-overbought",
+        type=float,
+        default=80,
+        help="Stochastic overbought level.",
+    )
+    parser.add_argument(
+        "--strategy-start-time",
+        help='Optional strategy start time, for example "09:30".',
+    )
+    parser.add_argument(
+        "--strategy-end-time",
+        help='Optional strategy end time, for example "15:30".',
+    )
     return parser.parse_args()
+
+
+def build_strategy_from_args(args: argparse.Namespace):
+    strategy_name = args.strategy or "random"
+
+    if strategy_name == "random":
+        return RandomEntryStrategy(
+            probability=args.random_probability,
+            seed=args.random_seed,
+            start_time=args.strategy_start_time,
+            end_time=args.strategy_end_time,
+        )
+
+    if strategy_name == "stochastic":
+        return StochasticLevelStrategy(
+            k_period=args.stoch_k_period,
+            d_period=args.stoch_d_period,
+            oversold_level=args.stoch_oversold,
+            overbought_level=args.stoch_overbought,
+            start_time=args.strategy_start_time,
+            end_time=args.strategy_end_time,
+        )
+
+    raise ValueError(f"Unsupported strategy: {strategy_name}")
+
+
+def load_or_generate_trades(args: argparse.Namespace):
+    if not args.market_data:
+        return load_trades(args.trades)
+
+    ohlc = load_ohlc_data(args.market_data, symbol=args.symbol)
+    strategy = build_strategy_from_args(args)
+    trades = backtest_strategy(
+        ohlc=ohlc,
+        strategy=strategy,
+        symbol=args.symbol,
+        quantity=args.quantity,
+        point_value=args.point_value,
+        stop_loss_points=args.stop_loss_points,
+        take_profit_points=args.take_profit_points,
+        max_holding_minutes=args.max_holding_minutes,
+        commission_per_side=args.commission_per_side,
+        same_bar_exit_policy=args.same_bar_exit_policy,
+    )
+
+    output_dir = Path("data/output")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    generated_trades_path = output_dir / "generated_trades.csv"
+    trades.to_csv(generated_trades_path, index=False)
+
+    print("\nGenerated trades from OHLC data")
+    print(f"Strategy: {getattr(strategy, 'name', strategy.__class__.__name__)}")
+    print(f"Generated trades: {len(trades)}")
+    print(f"Generated trades CSV: {generated_trades_path}")
+    if trades.empty:
+        print("No trades were generated by the selected strategy.")
+
+    return trades
 
 
 def run_comparison(preset_ids: list[str], trades: object) -> None:

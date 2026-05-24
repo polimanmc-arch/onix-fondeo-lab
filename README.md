@@ -124,6 +124,24 @@ Run with a custom trades CSV:
 PYTHONPATH=src python -m onix_fondeo.main --trades data/input/sample_trades.csv --preset tradeify_select_flex_50k
 ```
 
+Generate trades from OHLC data with the stochastic strategy:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy stochastic --preset tradeify_growth_50k
+```
+
+Run a random strategy comparison from the same OHLC data:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy random --compare tradeify_growth_50k lucid_trading_lucidflex_50k
+```
+
+Customize stop loss and take profit:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy stochastic --preset tradeify_growth_50k --stop-loss-points 25 --take-profit-points 50
+```
+
 Compare multiple presets:
 
 ```bash
