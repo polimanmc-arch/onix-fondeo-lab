@@ -369,3 +369,59 @@ def test_simulate_funding_processes_daily_continuity_payout_amount():
     results = simulate_funding(trades, config)
 
     assert [payout.gross_payout for payout in results["payouts"]] == [1000]
+
+
+def test_simulate_funding_updates_eod_drawdown_floor_on_day_change():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 1000,
+            },
+            {
+                "TradeID": 2,
+                "EntryTime": datetime(2026, 5, 21, 9, 30),
+                "ExitTime": datetime(2026, 5, 21, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": -100,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "account_size": 50000,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 999999,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+        "metadata": {
+            "drawdown_type": "EOD trailing max drawdown",
+        },
+    }
+
+    results = simulate_funding(trades, config)
+    account = results["accounts"][0]
+
+    assert account.eod_high_pnl == 1000
+    assert account.trailing_drawdown_floor == -1000
+    assert account.drawdown_locked is False

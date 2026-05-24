@@ -31,6 +31,9 @@ class Account:
     status: str = "ACTIVE"
     pnl: float = 0.0
     high_watermark: float = 0.0
+    eod_high_pnl: float = 0.0
+    trailing_drawdown_floor: Optional[float] = None
+    drawdown_locked: bool = False
     trading_days: set[date] = field(default_factory=set)
     daily_pnl: dict[date, float] = field(default_factory=dict)
     trades_count: int = 0

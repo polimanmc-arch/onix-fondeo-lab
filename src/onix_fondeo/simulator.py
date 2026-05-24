@@ -6,7 +6,9 @@ from onix_fondeo.models import Account, Payout, Trade
 from onix_fondeo.rules import (
     check_evaluation_status,
     check_funded_status,
+    get_account_size_from_config,
     process_funded_payout,
+    update_eod_trailing_drawdown,
 )
 
 
@@ -67,8 +69,15 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
         )
         next_account_id += 1
 
+    current_trade_day = None
+
     for _, row in trades_df.iterrows():
         trade = row_to_trade(row)
+        trade_day = _trade_day(trade)
+        if current_trade_day is not None and trade_day != current_trade_day:
+            _finalize_eod_for_active_accounts(accounts, config)
+        current_trade_day = trade_day
+
         funded_accounts_for_trade = list(active_funded_accounts)
 
         if active_eval is not None and active_eval.status == "ACTIVE":
@@ -76,7 +85,11 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 trade,
                 daily_profit_cap=evaluation_rules.get("daily_profit_cap"),
             )
-            status, reason = check_evaluation_status(active_eval, evaluation_rules)
+            status, reason = check_evaluation_status(
+                active_eval,
+                evaluation_rules,
+                metadata,
+            )
 
             if status in {"PASSED", "FAILED"}:
                 active_eval.status = status
@@ -159,12 +172,51 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 _trade_log_row(funded_account, trade, applied_pnl, status, reason)
             )
 
+    if current_trade_day is not None:
+        _finalize_eod_for_active_accounts(accounts, config)
+
     return {
         "accounts": accounts,
         "trade_log": trade_log,
         "payouts": payouts,
         "business_events": business_events,
     }
+
+
+def _trade_day(trade: Trade) -> Any:
+    trade_time = trade.exit_time or trade.entry_time
+    if hasattr(trade_time, "date"):
+        return trade_time.date()
+    return trade_time
+
+
+def _finalize_eod_for_active_accounts(
+    accounts: list[Account],
+    config: dict[str, Any],
+) -> None:
+    metadata = config.get("metadata", {})
+    account_size = get_account_size_from_config(config)
+
+    for account in accounts:
+        if account.status != "ACTIVE":
+            continue
+
+        if account.phase == "EVALUATION":
+            max_drawdown = config["evaluation"].get("max_drawdown")
+        elif account.phase == "FUNDED":
+            max_drawdown = config["funded"].get("max_drawdown")
+        else:
+            max_drawdown = None
+
+        if max_drawdown is None:
+            continue
+
+        update_eod_trailing_drawdown(
+            account,
+            max_drawdown=max_drawdown,
+            metadata=metadata,
+            account_size=account_size,
+        )
 
 
 def _open_evaluation_account(
@@ -244,4 +296,7 @@ def _trade_log_row(
         "AccountPnL": account.pnl,
         "StatusAfterTrade": status_after_trade,
         "StatusReason": status_reason,
+        "DrawdownFloor": account.trailing_drawdown_floor,
+        "EODHighPnL": account.eod_high_pnl,
+        "DrawdownLocked": account.drawdown_locked,
     }

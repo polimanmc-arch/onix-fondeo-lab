@@ -9,6 +9,87 @@ def check_max_drawdown(account: Account, max_drawdown: float) -> bool:
     return account.pnl <= -max_drawdown
 
 
+def is_eod_drawdown(metadata: dict[str, Any]) -> bool:
+    drawdown_type = str(metadata.get("drawdown_type", "")).lower()
+    return "eod" in drawdown_type or "end-of-day" in drawdown_type
+
+
+def get_account_size_from_config(config: dict[str, Any]) -> float | None:
+    for section_name in ("evaluation", "funded", "metadata"):
+        value = config.get(section_name, {}).get("account_size")
+        if value is not None:
+            return float(value)
+    return None
+
+
+def initialize_drawdown_floor(account: Account, max_drawdown: float) -> None:
+    if account.trailing_drawdown_floor is None:
+        account.trailing_drawdown_floor = -abs(max_drawdown)
+
+
+def check_drawdown_breach(
+    account: Account,
+    max_drawdown: float,
+    metadata: Optional[dict[str, Any]] = None,
+) -> bool:
+    metadata = metadata or {}
+    if not is_eod_drawdown(metadata):
+        return account.pnl <= -abs(max_drawdown)
+
+    initialize_drawdown_floor(account, max_drawdown)
+    return account.pnl <= account.trailing_drawdown_floor
+
+
+def update_eod_trailing_drawdown(
+    account: Account,
+    max_drawdown: float,
+    metadata: dict[str, Any],
+    account_size: Optional[float],
+) -> None:
+    # Incremental approximation: update on trade ExitTime date boundaries.
+    # This does not model official futures sessions or intraday high/low.
+    if not is_eod_drawdown(metadata):
+        return
+
+    initialize_drawdown_floor(account, max_drawdown)
+    account.eod_high_pnl = max(account.eod_high_pnl, account.pnl)
+
+    if account.drawdown_locked:
+        return
+
+    candidate_floor = account.eod_high_pnl - abs(max_drawdown)
+    account.trailing_drawdown_floor = max(
+        account.trailing_drawdown_floor,
+        candidate_floor,
+    )
+
+    lock_trigger_balance = metadata.get("lock_trigger_balance")
+    locked_drawdown_floor = metadata.get("locked_drawdown_floor")
+    if (
+        lock_trigger_balance is None
+        or locked_drawdown_floor is None
+        or account_size is None
+    ):
+        return
+
+    absolute_balance = account_size + account.pnl
+    if absolute_balance >= lock_trigger_balance:
+        locked_relative_floor = float(locked_drawdown_floor) - account_size
+        account.trailing_drawdown_floor = max(
+            account.trailing_drawdown_floor,
+            locked_relative_floor,
+        )
+        account.drawdown_locked = True
+
+
+def get_drawdown_status(account: Account) -> dict[str, Any]:
+    return {
+        "eod_high_pnl": account.eod_high_pnl,
+        "trailing_drawdown_floor": account.trailing_drawdown_floor,
+        "drawdown_locked": account.drawdown_locked,
+    }
+
+
 def check_max_daily_loss(
     account: Account,
     max_daily_loss: Optional[float],
@@ -38,8 +119,13 @@ def check_consistency(account: Account, consistency_percent: float) -> bool:
 def check_evaluation_status(
     account: Account,
     evaluation_rules: dict[str, Any],
+    metadata: Optional[dict[str, Any]] = None,
 ) -> tuple[str, str | None]:
-    if check_max_drawdown(account, evaluation_rules["max_drawdown"]):
+    if check_drawdown_breach(
+        account,
+        evaluation_rules["max_drawdown"],
+        metadata,
+    ):
         return "FAILED", "Max drawdown breached"
 
     if check_max_daily_loss(account, evaluation_rules.get("max_daily_loss")):
@@ -73,7 +159,7 @@ def check_funded_status(
     if not funded_rules.get("enabled", True):
         return "ACTIVE", None
 
-    if check_max_drawdown(account, funded_rules["max_drawdown"]):
+    if check_drawdown_breach(account, funded_rules["max_drawdown"], metadata):
         return "FAILED", "Funded max drawdown breached"
 
     if check_max_daily_loss(account, funded_rules.get("max_daily_loss")):

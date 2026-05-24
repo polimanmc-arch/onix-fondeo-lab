@@ -4,6 +4,7 @@ from onix_fondeo.models import Account
 from onix_fondeo.rules import (
     calculate_daily_continuity_payout_amount,
     check_daily_continuity_eligibility,
+    check_drawdown_breach,
     check_funded_consistency,
     check_funded_payout_eligibility,
     check_funded_status,
@@ -14,8 +15,10 @@ from onix_fondeo.rules import (
     get_payout_tier_key,
     get_required_winning_days,
     get_tiered_payout_amount,
+    initialize_drawdown_floor,
     is_daily_payout_policy,
     process_funded_payout,
+    update_eod_trailing_drawdown,
 )
 
 
@@ -469,3 +472,69 @@ def test_process_funded_payout_uses_daily_continuity_amount():
     )
 
     assert payout.gross_payout == 1000
+
+
+def test_static_drawdown_breach_still_works_without_eod_metadata():
+    account = Account(account_id=1, phase="FUNDED", pnl=-2000)
+
+    assert check_drawdown_breach(account, 2000, {}) is True
+
+
+def test_eod_drawdown_initial_floor_is_static_relative_floor():
+    account = Account(account_id=1, phase="FUNDED")
+
+    initialize_drawdown_floor(account, 2000)
+
+    assert account.trailing_drawdown_floor == -2000
+
+
+def test_eod_drawdown_floor_moves_after_eod_update():
+    account = Account(account_id=1, phase="FUNDED", pnl=1000)
+    metadata = {"drawdown_type": "EOD trailing max drawdown"}
+
+    update_eod_trailing_drawdown(account, 2000, metadata, account_size=50000)
+
+    assert account.eod_high_pnl == 1000
+    assert account.trailing_drawdown_floor == -1000
+
+
+def test_eod_drawdown_floor_does_not_move_down():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=1000,
+    )
+    metadata = {"drawdown_type": "EOD trailing max drawdown"}
+
+    update_eod_trailing_drawdown(account, 2000, metadata, account_size=50000)
+    account.pnl = 500
+    update_eod_trailing_drawdown(account, 2000, metadata, account_size=50000)
+
+    assert account.eod_high_pnl == 1000
+    assert account.trailing_drawdown_floor == -1000
+
+
+def test_eod_drawdown_can_lock_to_absolute_floor():
+    account = Account(account_id=1, phase="FUNDED", pnl=2100)
+    metadata = {
+        "drawdown_type": "EOD trailing max drawdown",
+        "lock_trigger_balance": 52100,
+        "locked_drawdown_floor": 50100,
+    }
+
+    update_eod_trailing_drawdown(account, 2000, metadata, account_size=50000)
+
+    assert account.drawdown_locked is True
+    assert account.trailing_drawdown_floor == 100
+
+
+def test_eod_drawdown_breaches_against_active_floor():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=50,
+        trailing_drawdown_floor=100,
+    )
+    metadata = {"drawdown_type": "EOD trailing max drawdown"}
+
+    assert check_drawdown_breach(account, 2000, metadata) is True
