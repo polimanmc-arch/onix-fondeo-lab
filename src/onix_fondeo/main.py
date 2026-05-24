@@ -1,6 +1,10 @@
+import argparse
+
 from onix_fondeo.loader import (
+    config_from_preset,
     list_presets,
     load_all_configs,
+    load_preset,
     load_trades,
     validate_preset_is_runnable,
 )
@@ -11,9 +15,18 @@ from onix_fondeo.simulator import simulate_funding
 
 def main():
     print("Starting Onix Fondeo Lab...")
+    args = parse_args()
 
-    trades = load_trades()
-    config = load_all_configs()
+    if args.list_presets:
+        print_presets()
+        return
+
+    trades = load_trades(args.trades)
+    config = load_config(args.preset)
+
+    if config is None:
+        return
+
     results = simulate_funding(trades, config)
     metrics = calculate_business_metrics(results, config)
     presets = []
@@ -75,6 +88,75 @@ def main():
 
     if "html_report" in exported_files:
         print(f"\nHTML report: {exported_files['html_report']}")
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run Onix Fondeo Lab simulations.")
+    parser.add_argument(
+        "--preset",
+        help="Preset ID to use for the simulation.",
+    )
+    parser.add_argument(
+        "--list-presets",
+        action="store_true",
+        help="List available presets and exit.",
+    )
+    parser.add_argument(
+        "--trades",
+        default="data/input/sample_trades.csv",
+        help="Trades CSV path.",
+    )
+    return parser.parse_args()
+
+
+def load_config(preset_id: str | None) -> dict | None:
+    if preset_id is None:
+        print("\nUsing default config files.")
+        return load_all_configs()
+
+    preset = load_preset(preset_id)
+    is_runnable, missing_fields = validate_preset_is_runnable(preset)
+    if not is_runnable:
+        print("\nPreset is not runnable")
+        print("Missing fields:")
+        for field_name in missing_fields:
+            print(f"- {field_name}")
+        return None
+
+    print(f"\nSelected preset: {preset['company']} - {preset['account_name']}")
+    print(f"Plan: {preset.get('plan')}")
+    print(f"Account size: {preset.get('account_size')}")
+    print(f"Source verified: {preset.get('is_official')}")
+    print(f"Rules verified: {preset.get('rules_verified')}")
+    return config_from_preset(preset)
+
+
+def print_presets() -> None:
+    presets = []
+    for preset in list_presets():
+        is_runnable, _ = validate_preset_is_runnable(preset)
+        presets.append((preset, is_runnable))
+
+    if not presets:
+        print("\nNo presets found.")
+        return
+
+    print("\nAvailable presets:")
+    print(
+        f"{'preset_id':<38} {'company':<20} {'plan':<24} "
+        f"{'account_name':<28} {'size':>8} {'verified':<9} {'runnable':<8}"
+    )
+    print("-" * 143)
+    for preset, is_runnable in presets:
+        print(
+            f"{preset.get('preset_id', ''):<38} "
+            f"{preset.get('company', ''):<20} "
+            f"{preset.get('plan', ''):<24} "
+            f"{preset.get('account_name', ''):<28} "
+            f"{preset.get('account_size', ''):>8} "
+            f"{str(preset.get('rules_verified', False)):<9} "
+            f"{'Yes' if is_runnable else 'No':<8}"
+        )
 
 
 if __name__ == "__main__":

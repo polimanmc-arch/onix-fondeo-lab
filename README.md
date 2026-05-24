@@ -72,8 +72,29 @@ pip install -r requirements.txt
 
 ## How To Run
 
+Run with the default config files:
+
 ```bash
 PYTHONPATH=src python -m onix_fondeo.main
+```
+
+Run with a preset:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --preset tradeify_growth_50k
+PYTHONPATH=src python -m onix_fondeo.main --preset lucid_trading_luciddirect_50k
+```
+
+List available presets:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --list-presets
+```
+
+Run with a custom trades CSV:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --trades data/input/sample_trades.csv --preset tradeify_select_flex_50k
 ```
 
 ## How To Run Tests
