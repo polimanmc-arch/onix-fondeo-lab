@@ -9,7 +9,7 @@ from onix_fondeo.loader import (
     validate_preset_is_runnable,
 )
 from onix_fondeo.metrics import calculate_business_metrics
-from onix_fondeo.report import export_results
+from onix_fondeo.report import export_comparison_results, export_results
 from onix_fondeo.simulator import simulate_funding
 
 
@@ -22,6 +22,11 @@ def main():
         return
 
     trades = load_trades(args.trades)
+
+    if args.compare:
+        run_comparison(args.compare, trades)
+        return
+
     config = load_config(args.preset)
 
     if config is None:
@@ -97,6 +102,12 @@ def parse_args() -> argparse.Namespace:
         help="Preset ID to use for the simulation.",
     )
     parser.add_argument(
+        "--compare",
+        nargs="+",
+        metavar="PRESET_ID",
+        help="Compare multiple runnable presets using the same trades CSV.",
+    )
+    parser.add_argument(
         "--list-presets",
         action="store_true",
         help="List available presets and exit.",
@@ -107,6 +118,78 @@ def parse_args() -> argparse.Namespace:
         help="Trades CSV path.",
     )
     return parser.parse_args()
+
+
+def run_comparison(preset_ids: list[str], trades: object) -> None:
+    comparison_rows = []
+    skipped_presets = []
+
+    for preset_id in preset_ids:
+        try:
+            preset = load_preset(preset_id)
+        except ValueError as error:
+            print(f"\nSkipping preset: {preset_id}")
+            print(error)
+            skipped_presets.append(preset_id)
+            continue
+
+        is_runnable, missing_fields = validate_preset_is_runnable(preset)
+        if not is_runnable:
+            print(f"\nSkipping preset: {preset_id}")
+            print("Preset is not runnable")
+            print("Missing fields:")
+            for field_name in missing_fields:
+                print(f"- {field_name}")
+            skipped_presets.append(preset_id)
+            continue
+
+        config = config_from_preset(preset)
+        results = simulate_funding(trades, config)
+        metrics = calculate_business_metrics(results, config)
+        comparison_rows.append(_comparison_row(preset, metrics))
+
+    if not comparison_rows:
+        print("\nNo runnable presets available for comparison.")
+        return
+
+    exported_files = export_comparison_results(comparison_rows)
+    top_rows = sorted(
+        comparison_rows,
+        key=lambda row: row["net_business_pnl"],
+        reverse=True,
+    )
+
+    print("\nComparison completed.")
+    print(f"Runnable presets compared: {len(comparison_rows)}")
+    print(f"Skipped presets: {len(skipped_presets)}")
+
+    print("\nTop by Net Business PnL:")
+    for index, row in enumerate(top_rows[:3], start=1):
+        print(
+            f"{index}. {row['preset_id']} | "
+            f"{row['net_business_pnl']:.2f} | "
+            f"{row['roi']:.2%}"
+        )
+
+    print("\nExported:")
+    print(f"- {exported_files['comparison_summary']}")
+    print(f"- {exported_files['comparison_report']}")
+
+
+def _comparison_row(
+    preset: dict,
+    metrics: dict,
+) -> dict:
+    metadata = preset.get("metadata", {})
+    return {
+        "preset_id": preset["preset_id"],
+        "company": preset["company"],
+        "plan": preset.get("plan"),
+        "account_name": preset.get("account_name"),
+        "account_size": preset.get("account_size"),
+        "straight_to_funded": bool(metadata.get("straight_to_funded", False)),
+        **metrics,
+    }
 
 
 def load_config(preset_id: str | None) -> dict | None:

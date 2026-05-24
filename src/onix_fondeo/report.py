@@ -52,6 +52,33 @@ BUSINESS_EVENT_COLUMNS = [
     "account_id",
 ]
 
+COMPARISON_COLUMNS = [
+    "preset_id",
+    "company",
+    "plan",
+    "account_name",
+    "account_size",
+    "straight_to_funded",
+    "total_evaluations",
+    "passed_evaluations",
+    "failed_evaluations",
+    "active_evaluations",
+    "funded_accounts_created",
+    "funded_failed",
+    "funded_active",
+    "funded_with_payout",
+    "pass_rate",
+    "payout_rate_on_evaluations",
+    "payout_rate_on_passed",
+    "total_evaluation_cost",
+    "total_gross_payout",
+    "total_net_payout",
+    "net_business_pnl",
+    "roi",
+    "expected_value_per_evaluation",
+    "total_payouts",
+]
+
 
 def accounts_to_dataframe(accounts: list[Account]) -> pd.DataFrame:
     rows = []
@@ -151,6 +178,312 @@ def export_metrics(
         json.dump(metrics, file, indent=2, default=str)
 
     return file_path
+
+
+def export_comparison_results(
+    comparison_rows: list[dict[str, Any]],
+    output_dir: str | Path = "data/output",
+) -> dict[str, Path]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    file_paths = {
+        "comparison_summary": output_path / "comparison_summary.csv",
+        "comparison_report": output_path / "comparison_report.html",
+    }
+
+    pd.DataFrame(comparison_rows, columns=COMPARISON_COLUMNS).to_csv(
+        file_paths["comparison_summary"],
+        index=False,
+    )
+    _generate_comparison_html_report(
+        comparison_rows,
+        file_paths["comparison_report"],
+    )
+
+    return file_paths
+
+
+def _generate_comparison_html_report(
+    comparison_rows: list[dict[str, Any]],
+    file_path: Path,
+) -> None:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    best_net = _best_value(comparison_rows, "net_business_pnl", highest=True)
+    best_roi = _best_value(comparison_rows, "roi", highest=True)
+    best_payout = _best_value(comparison_rows, "total_net_payout", highest=True)
+    lowest_cost = _best_value(
+        comparison_rows,
+        "total_evaluation_cost",
+        highest=False,
+    )
+
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onix Fondeo Lab - Preset Comparison Report</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #ffffff;
+      color: #172033;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }}
+    main {{
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }}
+    h1 {{
+      margin: 0 0 4px;
+      font-size: 30px;
+    }}
+    h2 {{
+      margin: 30px 0 12px;
+      font-size: 20px;
+    }}
+    .timestamp {{
+      margin: 0 0 24px;
+      color: #64748b;
+      font-size: 14px;
+    }}
+    .summary {{
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #f8fafc;
+      font-weight: 700;
+    }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #e2e8f0;
+      font-size: 13px;
+    }}
+    th, td {{
+      padding: 9px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      vertical-align: top;
+      white-space: nowrap;
+    }}
+    th {{
+      background: #f1f5f9;
+      color: #334155;
+      font-weight: 700;
+    }}
+    tr:nth-child(even) td {{
+      background: #f8fafc;
+    }}
+    .table-wrap {{
+      overflow-x: auto;
+    }}
+    .positive {{
+      color: #047857;
+      font-weight: 700;
+    }}
+    .negative {{
+      color: #b91c1c;
+      font-weight: 700;
+    }}
+    .best {{
+      outline: 2px solid #f59e0b;
+      outline-offset: -2px;
+      background: #fffbeb !important;
+      font-weight: 700;
+    }}
+    .bar-list {{
+      display: grid;
+      gap: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      background: #ffffff;
+    }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: minmax(220px, 320px) 1fr minmax(90px, auto);
+      gap: 12px;
+      align-items: center;
+    }}
+    .bar-label {{
+      color: #334155;
+      font-weight: 700;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }}
+    .bar-track {{
+      height: 16px;
+      border-radius: 999px;
+      background: #e2e8f0;
+      overflow: hidden;
+    }}
+    .bar-fill {{
+      height: 100%;
+      min-width: 2px;
+      border-radius: 999px;
+      background: #2563eb;
+    }}
+    @media (max-width: 760px) {{
+      .bar-row {{
+        grid-template-columns: 1fr;
+      }}
+    }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Onix Fondeo Lab - Preset Comparison Report</h1>
+    <p class="timestamp">Generated: {escape(generated_at)}</p>
+    <div class="summary">Number of presets compared: {len(comparison_rows)}</div>
+
+    <h2>Net Business PnL</h2>
+    {_comparison_bar_html(comparison_rows, "net_business_pnl", value_type="money")}
+
+    <h2>ROI</h2>
+    {_comparison_bar_html(comparison_rows, "roi", value_type="percent")}
+
+    <h2>Comparison Table</h2>
+    <div class="table-wrap">
+      {_comparison_table_html(
+        comparison_rows,
+        best_values={
+            "net_business_pnl": best_net,
+            "roi": best_roi,
+            "total_net_payout": best_payout,
+            "total_evaluation_cost": lowest_cost,
+        },
+    )}
+    </div>
+  </main>
+</body>
+</html>
+"""
+    file_path.write_text(html, encoding="utf-8")
+
+
+def _best_value(
+    rows: list[dict[str, Any]],
+    field_name: str,
+    highest: bool,
+) -> float | int | None:
+    values = [
+        row.get(field_name)
+        for row in rows
+        if isinstance(row.get(field_name), (int, float))
+    ]
+    if not values:
+        return None
+    return max(values) if highest else min(values)
+
+
+def _comparison_table_html(
+    comparison_rows: list[dict[str, Any]],
+    best_values: dict[str, float | int | None],
+) -> str:
+    if not comparison_rows:
+        return '<p class="empty">No presets compared.</p>'
+
+    header = "".join(
+        f"<th>{escape(column)}</th>" for column in COMPARISON_COLUMNS
+    )
+    rows = []
+    for row in comparison_rows:
+        cells = []
+        for column in COMPARISON_COLUMNS:
+            value = row.get(column)
+            css_classes = []
+            if column in best_values and best_values[column] == value:
+                css_classes.append("best")
+            if column in _comparison_numeric_columns():
+                number_class = _number_class(value)
+                if number_class:
+                    css_classes.append(number_class)
+            class_attr = (
+                f' class="{" ".join(css_classes)}"' if css_classes else ""
+            )
+            cells.append(
+                f"<td{class_attr}>{escape(_format_comparison_value(column, value))}</td>"
+            )
+        rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return f"<table><thead><tr>{header}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+
+
+def _comparison_bar_html(
+    comparison_rows: list[dict[str, Any]],
+    field_name: str,
+    value_type: str,
+) -> str:
+    if not comparison_rows:
+        return '<p class="empty">No presets compared.</p>'
+
+    max_abs = max(abs(float(row.get(field_name, 0) or 0)) for row in comparison_rows)
+    bars = []
+    for row in comparison_rows:
+        value = float(row.get(field_name, 0) or 0)
+        width = 0.0 if max_abs == 0 else abs(value) / max_abs * 100
+        label = f"{row.get('preset_id')} | {row.get('account_name')}"
+        bars.append(
+            (
+                '<div class="bar-row">'
+                f'<div class="bar-label">{escape(label)}</div>'
+                '<div class="bar-track">'
+                f'<div class="bar-fill" style="width: {width:.2f}%;"></div>'
+                "</div>"
+                f'<div class="{_number_class(value)}">'
+                f"{escape(_format_bar_value(value, value_type))}</div>"
+                "</div>"
+            )
+        )
+    return f'<div class="bar-list">{"".join(bars)}</div>'
+
+
+def _format_bar_value(value: float, value_type: str) -> str:
+    if value_type == "percent":
+        return format_percent(value)
+    return _format_dollar(value)
+
+
+def _format_comparison_value(column: str, value: Any) -> str:
+    if value is None:
+        return ""
+    if column in {
+        "pass_rate",
+        "payout_rate_on_evaluations",
+        "payout_rate_on_passed",
+        "roi",
+    }:
+        return format_percent(float(value))
+    if column in {
+        "total_evaluation_cost",
+        "total_gross_payout",
+        "total_net_payout",
+        "net_business_pnl",
+        "expected_value_per_evaluation",
+    }:
+        return _format_dollar(float(value))
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
+
+
+def _format_dollar(value: float) -> str:
+    return f"${value:,.2f}"
+
+
+def _comparison_numeric_columns() -> set[str]:
+    return {
+        "total_evaluation_cost",
+        "total_gross_payout",
+        "total_net_payout",
+        "net_business_pnl",
+        "roi",
+        "expected_value_per_evaluation",
+    }
 
 
 def generate_html_report(

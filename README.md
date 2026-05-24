@@ -97,6 +97,24 @@ Run with a custom trades CSV:
 PYTHONPATH=src python -m onix_fondeo.main --trades data/input/sample_trades.csv --preset tradeify_select_flex_50k
 ```
 
+Compare multiple presets:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --compare tradeify_growth_50k tradeify_select_flex_50k tradeify_lightning_funded_50k
+```
+
+Compare Lucid Trading vs Tradeify:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --compare lucid_trading_lucidflex_50k tradeify_growth_50k
+```
+
+After comparison, open:
+
+```text
+data/output/comparison_report.html
+```
+
 ## How To Run Tests
 
 ```bash
