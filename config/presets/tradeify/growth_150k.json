@@ -1,0 +1,72 @@
+{
+  "preset_id": "tradeify_growth_150k",
+  "company": "Tradeify",
+  "plan": "Growth Evaluation",
+  "account_name": "Growth 150K",
+  "account_type": "Growth Evaluation",
+  "account_size": 150000,
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://help.tradeify.co/en/",
+  "source_urls": [
+    "https://help.tradeify.co/en/"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "evaluation": {
+    "enabled": true,
+    "account_size": 150000,
+    "evaluation_cost": null,
+    "profit_target": 9000,
+    "max_drawdown": 5000,
+    "max_daily_loss": 3750,
+    "minimum_trading_days": 1,
+    "daily_profit_cap": null,
+    "consistency_enabled": false,
+    "consistency_percent": null
+  },
+  "funded": {
+    "enabled": true,
+    "max_drawdown": 5000,
+    "max_daily_loss": 3750,
+    "mll_freeze_profit": null,
+    "minimum_withdrawable_profit": null,
+    "payout_trigger_profit": null,
+    "profit_split": 0.9,
+    "reset_after_payout": false
+  },
+  "simulation": {
+    "max_accounts": 100,
+    "recycle_failed_accounts": true,
+    "continue_after_pass": true
+  },
+  "metadata": {
+    "max_size": "15 minis",
+    "profit_split": 0.9,
+    "funded_consistency_enabled": true,
+    "funded_consistency_percent": 0.35,
+    "funded_minimum_trading_days_with_profit": 5,
+    "daily_loss_limit_is_soft_breach": true,
+    "drawdown_type": "EOD trailing max drawdown",
+    "drawdown_breach_type": "hard",
+    "funded_payout_policy": "Growth Funded",
+    "elite_live_path": true,
+    "max_sim_funded_accounts": 5,
+    "no_activation_fees": true,
+    "no_time_limit_for_evaluations": true,
+    "close_positions_before": "4:59 PM ET",
+    "no_overnight_positions": true,
+    "supported_markets": "CME futures only",
+    "platforms": [
+      "Tradovate",
+      "NinjaTrader 8",
+      "TradingView via Tradovate",
+      "Rithmic",
+      "Tradesea",
+      "Quantower",
+      "Sierra Chart",
+      "R|Trader",
+      "WealthCharts"
+    ]
+  }
+}

@@ -1,0 +1,80 @@
+{
+  "preset_id": "tradeify_lightning_funded_100k",
+  "company": "Tradeify",
+  "plan": "Lightning Funded",
+  "account_name": "Lightning Funded 100K",
+  "account_type": "Lightning Funded",
+  "account_size": 100000,
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://help.tradeify.co/en/",
+  "source_urls": [
+    "https://help.tradeify.co/en/"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "evaluation": {
+    "enabled": false,
+    "account_size": 100000,
+    "evaluation_cost": null,
+    "profit_target": null,
+    "max_drawdown": null,
+    "max_daily_loss": null,
+    "minimum_trading_days": null,
+    "daily_profit_cap": null,
+    "consistency_enabled": null,
+    "consistency_percent": null
+  },
+  "funded": {
+    "enabled": true,
+    "max_drawdown": 3500,
+    "max_daily_loss": 2500,
+    "mll_freeze_profit": null,
+    "minimum_withdrawable_profit": null,
+    "payout_trigger_profit": 5000,
+    "profit_split": 0.9,
+    "reset_after_payout": false
+  },
+  "simulation": {
+    "max_accounts": 100,
+    "recycle_failed_accounts": true,
+    "continue_after_pass": true
+  },
+  "metadata": {
+    "position_size": "10 minis",
+    "initial_profit_goal": 5000,
+    "straight_to_funded": true,
+    "no_resets_available": true,
+    "consistency_progression_post_2025_12_09": [
+      0.2,
+      0.25,
+      0.3
+    ],
+    "legacy_consistency_pre_2025_12_09": 0.2,
+    "profit_split": 0.9,
+    "payout_minimum": 500,
+    "no_minimum_trading_day_count": true,
+    "instant_payouts": true,
+    "daily_loss_limit_is_soft_breach": true,
+    "drawdown_type": "EOD trailing max drawdown",
+    "drawdown_breach_type": "hard",
+    "elite_live_path": true,
+    "max_sim_funded_accounts": 5,
+    "no_activation_fees": true,
+    "no_time_limit_for_evaluations": true,
+    "close_positions_before": "4:59 PM ET",
+    "no_overnight_positions": true,
+    "supported_markets": "CME futures only",
+    "platforms": [
+      "Tradovate",
+      "NinjaTrader 8",
+      "TradingView via Tradovate",
+      "Rithmic",
+      "Tradesea",
+      "Quantower",
+      "Sierra Chart",
+      "R|Trader",
+      "WealthCharts"
+    ]
+  }
+}

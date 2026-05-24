@@ -1,0 +1,74 @@
+{
+  "preset_id": "tradeify_select_flex_50k",
+  "company": "Tradeify",
+  "plan": "Select Flex",
+  "account_name": "Select Flex 50K",
+  "account_type": "Select Flex",
+  "account_size": 50000,
+  "is_official": true,
+  "rules_verified": true,
+  "source_url": "https://help.tradeify.co/en/",
+  "source_urls": [
+    "https://help.tradeify.co/en/"
+  ],
+  "last_verified_at": "2026-05-23",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "evaluation": {
+    "enabled": true,
+    "account_size": 50000,
+    "evaluation_cost": null,
+    "profit_target": 3000,
+    "max_drawdown": 2000,
+    "max_daily_loss": null,
+    "minimum_trading_days": 3,
+    "daily_profit_cap": null,
+    "consistency_enabled": true,
+    "consistency_percent": 0.4
+  },
+  "funded": {
+    "enabled": true,
+    "max_drawdown": 2000,
+    "max_daily_loss": null,
+    "mll_freeze_profit": null,
+    "minimum_withdrawable_profit": null,
+    "payout_trigger_profit": null,
+    "profit_split": 0.9,
+    "reset_after_payout": false
+  },
+  "simulation": {
+    "max_accounts": 100,
+    "recycle_failed_accounts": true,
+    "continue_after_pass": true
+  },
+  "metadata": {
+    "funded_payout_policy": "Select Flex",
+    "select_policy_choice_is_permanent": true,
+    "minimum_trading_days_with_profit": 5,
+    "daily_loss_limit": null,
+    "daily_loss_limit_is_soft_breach": false,
+    "payout_style": "5-Day Payout Policy",
+    "caps_type": "larger milestone-based caps",
+    "requires_new_profit_between_payouts": true,
+    "contract_scaling": true,
+    "drawdown_type": "EOD trailing max drawdown",
+    "drawdown_locks_at_starting_balance_plus_100": true,
+    "elite_live_path": true,
+    "max_sim_funded_accounts": 5,
+    "no_activation_fees": true,
+    "no_time_limit_for_evaluations": true,
+    "close_positions_before": "4:59 PM ET",
+    "no_overnight_positions": true,
+    "supported_markets": "CME futures only",
+    "platforms": [
+      "Tradovate",
+      "NinjaTrader 8",
+      "TradingView via Tradovate",
+      "Rithmic",
+      "Tradesea",
+      "Quantower",
+      "Sierra Chart",
+      "R|Trader",
+      "WealthCharts"
+    ]
+  }
+}
