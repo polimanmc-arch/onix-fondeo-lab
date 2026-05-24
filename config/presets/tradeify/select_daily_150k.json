@@ -12,11 +12,11 @@
     "https://help.tradeify.co/en/"
   ],
   "last_verified_at": "2026-05-23",
-  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026 and completed with manually verified Select pricing/payout values provided by the user. Verify again before real-money use.",
   "evaluation": {
     "enabled": true,
     "account_size": 150000,
-    "evaluation_cost": null,
+    "evaluation_cost": 221,
     "profit_target": 9000,
     "max_drawdown": 4500,
     "max_daily_loss": null,
@@ -27,11 +27,11 @@
   },
   "funded": {
     "enabled": true,
-    "max_drawdown": 4500,
+    "max_drawdown": 3500,
     "max_daily_loss": 1750,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
+    "minimum_withdrawable_profit": 2500,
+    "payout_trigger_profit": 6100,
     "profit_split": 0.9,
     "reset_after_payout": false
   },
@@ -67,6 +67,19 @@
       "Sierra Chart",
       "R|Trader",
       "WealthCharts"
-    ]
+    ],
+    "contract_scaling_calibration": "End of Day",
+    "profit_split": 0.9,
+    "buffer_amount": 3600,
+    "minimum_payout": 250,
+    "payout_cap": 2500,
+    "payout_formula": "Up to 2x cycle profit, capped at 2500",
+    "funded_consistency_enabled": false,
+    "starting_contracts": "3 mini / 30 micros",
+    "max_contracts_scaled": "12 mini / 120 micros",
+    "lock_trigger_balance": 153600,
+    "locked_drawdown_floor": 150100,
+    "simulation_approximation": true,
+    "simulation_approximation_notes": "Current engine approximates Select Daily by using buffer plus payout cap as payout trigger and the payout cap as gross payout amount. It does not yet fully simulate Daily Continuity Rule, positive cycle profit, EOD drawdown locking, or scaling."
   }
 }

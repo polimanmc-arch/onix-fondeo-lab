@@ -12,11 +12,11 @@
     "https://help.tradeify.co/en/"
   ],
   "last_verified_at": "2026-05-23",
-  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026. Some payout/pricing fields remain null because they were not present in the provided summary. Verify again before real-money use.",
+  "notes": "Rules extracted from Tradeify Help Center documentation compiled in May 2026 and completed with manually verified Select pricing/payout values provided by the user. Verify again before real-money use.",
   "evaluation": {
     "enabled": true,
     "account_size": 25000,
-    "evaluation_cost": null,
+    "evaluation_cost": 65,
     "profit_target": 1500,
     "max_drawdown": 1000,
     "max_daily_loss": null,
@@ -30,8 +30,8 @@
     "max_drawdown": 1000,
     "max_daily_loss": null,
     "mll_freeze_profit": null,
-    "minimum_withdrawable_profit": null,
-    "payout_trigger_profit": null,
+    "minimum_withdrawable_profit": 1250,
+    "payout_trigger_profit": 2500,
     "profit_split": 0.9,
     "reset_after_payout": false
   },
@@ -69,6 +69,19 @@
       "Sierra Chart",
       "R|Trader",
       "WealthCharts"
-    ]
+    ],
+    "contract_scaling_calibration": "End of Day",
+    "profit_split": 0.9,
+    "minimum_winning_days": 5,
+    "winning_day_threshold": 100,
+    "payout_cap": 1250,
+    "payout_formula": "Up to 50% of total profits, capped at 1250",
+    "funded_consistency_enabled": false,
+    "starting_contracts": "1 mini / 10 micros",
+    "max_contracts_scaled": "2 mini / 20 micros",
+    "lock_trigger_balance": 26600,
+    "locked_drawdown_floor": 25100,
+    "simulation_approximation": true,
+    "simulation_approximation_notes": "Current engine approximates Select Flex by using 2x the payout cap as payout trigger and the payout cap as gross payout amount. It does not yet fully simulate 5 winning days, positive cycle profit, EOD drawdown locking, or scaling."
   }
 }
