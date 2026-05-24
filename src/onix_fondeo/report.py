@@ -321,15 +321,43 @@ def generate_html_report(
       height: auto;
       display: block;
     }}
-    .preset-grid {{
+    .preset-selector {{
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      background: #f8fafc;
+    }}
+    .preset-selector-help {{
+      margin: 0 0 14px;
+      color: #64748b;
+      font-size: 14px;
+    }}
+    .preset-controls {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      grid-template-columns: repeat(3, minmax(160px, 1fr));
       gap: 12px;
+      margin-bottom: 16px;
+    }}
+    .preset-control label {{
+      display: block;
+      margin-bottom: 5px;
+      color: #334155;
+      font-size: 13px;
+      font-weight: 700;
+    }}
+    .preset-control select {{
+      width: 100%;
+      padding: 9px 10px;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #ffffff;
+      color: #172033;
+      font-size: 14px;
     }}
     .preset-card {{
       border: 1px solid #e2e8f0;
       border-radius: 8px;
-      padding: 14px 16px;
+      padding: 16px;
       background: #ffffff;
     }}
     .preset-title {{
@@ -348,6 +376,29 @@ def generate_html_report(
       gap: 12px;
       margin-top: 6px;
       font-size: 13px;
+    }}
+    .preset-summary {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }}
+    .preset-summary-block {{
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px;
+      background: #f8fafc;
+    }}
+    .preset-summary-block h4 {{
+      margin: 0 0 8px;
+      font-size: 14px;
+    }}
+    .preset-source {{
+      margin-top: 12px;
+      font-size: 13px;
+    }}
+    .preset-source a {{
+      color: #2563eb;
     }}
     .badge {{
       display: inline-block;
@@ -375,6 +426,11 @@ def generate_html_report(
       background: #f1f5f9;
       color: #475569;
       font-size: 12px;
+    }}
+    @media (max-width: 720px) {{
+      .preset-controls {{
+        grid-template-columns: 1fr;
+      }}
     }}
   </style>
 </head>
@@ -473,6 +529,7 @@ def generate_html_report(
       )}
     </section>
   </main>
+  {_presets_script_html(presets or [])}
 </body>
 </html>
 """
@@ -645,58 +702,197 @@ def _presets_catalog_html(presets: list[dict[str, Any]]) -> str:
     if not presets:
         return '<p class="empty">No funding presets available.</p>'
 
-    cards = []
-    for preset in presets:
-        is_official = bool(preset.get("is_official", False))
-        rules_verified = bool(preset.get("rules_verified", False))
-        is_runnable = bool(preset.get("is_runnable", False))
-        missing_fields = preset.get("missing_fields", [])
-
-        cards.append(
-            (
-                '<div class="preset-card">'
-                f'<h3 class="preset-title">{escape(str(preset.get("account_name", "")))}</h3>'
-                f'<p class="preset-meta">{escape(str(preset.get("company", "")))}'
-                f' | {escape(str(preset.get("plan", "")))}</p>'
-                f'{_preset_row_html("Account size", _format_account_size(preset.get("account_size")))}'
-                f'{_preset_row_html("Official status", "Official" if is_official else "Template")}'
-                f'{_preset_row_html("Rules status", "Verified" if rules_verified else "Not verified")}'
-                f'{_preset_row_html("Runnable", "Yes" if is_runnable else "No")}'
-                f'{_preset_row_html("Missing fields", str(len(missing_fields)))}'
-                f'{_badge_html("Official" if is_official else "Template", is_official)}'
-                f'{_badge_html("Verified" if rules_verified else "Not verified", rules_verified)}'
-                f'{_badge_html("Runnable" if is_runnable else "Not runnable", is_runnable)}'
-                f'{_missing_field_tags_html(missing_fields)}'
-                "</div>"
-            )
-        )
-
-    return f'<div class="preset-grid">{"".join(cards)}</div>'
+    return """
+<div class="preset-selector">
+  <p class="preset-selector-help">Select a company, plan and account size to inspect a funding preset.</p>
+  <div class="preset-controls">
+    <div class="preset-control">
+      <label for="preset-company">Company</label>
+      <select id="preset-company"></select>
+    </div>
+    <div class="preset-control">
+      <label for="preset-plan">Plan</label>
+      <select id="preset-plan"></select>
+    </div>
+    <div class="preset-control">
+      <label for="preset-size">Account Size</label>
+      <select id="preset-size"></select>
+    </div>
+  </div>
+  <div id="selected-preset-card"></div>
+</div>
+"""
 
 
-def _preset_row_html(label: str, value: str) -> str:
-    return (
-        '<div class="preset-row">'
-        f"<span>{escape(label)}</span>"
-        f"<strong>{escape(value)}</strong>"
-        "</div>"
-    )
-
-
-def _badge_html(label: str, is_good: bool) -> str:
-    css_class = "good" if is_good else "warn"
-    return f'<span class="badge {css_class}">{escape(label)}</span>'
-
-
-def _missing_field_tags_html(missing_fields: list[str]) -> str:
-    if not missing_fields:
+def _presets_script_html(presets: list[dict[str, Any]]) -> str:
+    if not presets:
         return ""
 
-    tags = "".join(
-        f'<span class="tag">{escape(field_name)}</span>'
-        for field_name in missing_fields[:5]
-    )
-    return f"<div>{tags}</div>"
+    presets_json = json.dumps(presets, default=str)
+    return f"""
+<script>
+  const presetCatalog = {presets_json};
+
+  function uniqueValues(items, getter) {{
+    return Array.from(new Set(items.map(getter).filter(Boolean)));
+  }}
+
+  function setOptions(select, values, formatter) {{
+    select.innerHTML = "";
+    values.forEach((value) => {{
+      const option = document.createElement("option");
+      option.value = value;
+      option.textContent = formatter ? formatter(value) : value;
+      select.appendChild(option);
+    }});
+  }}
+
+  function formatAccountSize(value) {{
+    if (value === null || value === undefined || value === "") return "";
+    return Number(value).toLocaleString("en-US");
+  }}
+
+  function formatValue(value) {{
+    if (value === null || value === undefined) return "";
+    if (typeof value === "boolean") return value ? "true" : "false";
+    if (typeof value === "number") return value.toLocaleString("en-US");
+    return String(value);
+  }}
+
+  function escapeHtml(value) {{
+    return String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }}
+
+  function presetRow(label, value) {{
+    return `<div class="preset-row"><span>${{escapeHtml(label)}}</span><strong>${{escapeHtml(formatValue(value))}}</strong></div>`;
+  }}
+
+  function badge(label, isGood) {{
+    return `<span class="badge ${{isGood ? "good" : "warn"}}">${{escapeHtml(label)}}</span>`;
+  }}
+
+  function summaryBlock(title, rows) {{
+    return `
+      <div class="preset-summary-block">
+        <h4>${{escapeHtml(title)}}</h4>
+        ${{rows.map(([label, value]) => presetRow(label, value)).join("")}}
+      </div>
+    `;
+  }}
+
+  function renderPresetCard(preset) {{
+    if (!preset) {{
+      document.getElementById("selected-preset-card").innerHTML = '<p class="empty">No matching preset found.</p>';
+      return;
+    }}
+
+    const missingFields = preset.missing_fields || [];
+    const missingTags = missingFields.slice(0, 8)
+      .map((field) => `<span class="tag">${{escapeHtml(field)}}</span>`)
+      .join("");
+    const sourceUrl = preset.source_url
+      ? `<div class="preset-source"><strong>Source:</strong> <a href="${{escapeHtml(preset.source_url)}}" target="_blank" rel="noopener noreferrer">${{escapeHtml(preset.source_url)}}</a></div>`
+      : "";
+
+    const evaluationRows = [
+      ["enabled", preset.evaluation?.enabled],
+      ["profit_target", preset.evaluation?.profit_target],
+      ["max_drawdown", preset.evaluation?.max_drawdown],
+      ["max_daily_loss", preset.evaluation?.max_daily_loss],
+      ["minimum_trading_days", preset.evaluation?.minimum_trading_days],
+      ["consistency_enabled", preset.evaluation?.consistency_enabled],
+      ["consistency_percent", preset.evaluation?.consistency_percent],
+    ];
+    const fundedRows = [
+      ["enabled", preset.funded?.enabled],
+      ["max_drawdown", preset.funded?.max_drawdown],
+      ["max_daily_loss", preset.funded?.max_daily_loss],
+      ["minimum_withdrawable_profit", preset.funded?.minimum_withdrawable_profit],
+      ["payout_trigger_profit", preset.funded?.payout_trigger_profit],
+      ["profit_split", preset.funded?.profit_split],
+    ];
+
+    document.getElementById("selected-preset-card").innerHTML = `
+      <div class="preset-card">
+        <h3 class="preset-title">${{escapeHtml(preset.account_name)}}</h3>
+        <p class="preset-meta">${{escapeHtml(preset.company)}} | ${{escapeHtml(preset.plan)}}</p>
+        ${{presetRow("Company", preset.company)}}
+        ${{presetRow("Plan", preset.plan)}}
+        ${{presetRow("Account name", preset.account_name)}}
+        ${{presetRow("Account size", formatAccountSize(preset.account_size))}}
+        ${{presetRow("Official status", preset.is_official ? "Official" : "Template")}}
+        ${{presetRow("Rules verified", preset.rules_verified ? "Verified" : "Not verified")}}
+        ${{presetRow("Runnable", preset.is_runnable ? "Yes" : "No")}}
+        ${{presetRow("Missing fields", missingFields.length)}}
+        ${{badge(preset.is_official ? "Official" : "Template", Boolean(preset.is_official))}}
+        ${{badge(preset.rules_verified ? "Verified" : "Not verified", Boolean(preset.rules_verified))}}
+        ${{badge(preset.is_runnable ? "Runnable" : "Not runnable", Boolean(preset.is_runnable))}}
+        <div>${{missingTags}}</div>
+        <div class="preset-summary">
+          ${{summaryBlock("Evaluation", evaluationRows)}}
+          ${{summaryBlock("Funded", fundedRows)}}
+        </div>
+        ${{sourceUrl}}
+        <p class="chart-note">${{escapeHtml(preset.notes || "")}}</p>
+      </div>
+    `;
+  }}
+
+  function selectedPreset() {{
+    const company = document.getElementById("preset-company").value;
+    const plan = document.getElementById("preset-plan").value;
+    const size = Number(document.getElementById("preset-size").value);
+    return presetCatalog.find((preset) =>
+      preset.company === company &&
+      preset.plan === plan &&
+      Number(preset.account_size) === size
+    );
+  }}
+
+  function updateSizes() {{
+    const company = document.getElementById("preset-company").value;
+    const plan = document.getElementById("preset-plan").value;
+    const sizes = uniqueValues(
+      presetCatalog.filter((preset) => preset.company === company && preset.plan === plan),
+      (preset) => Number(preset.account_size)
+    ).sort((a, b) => a - b);
+    setOptions(document.getElementById("preset-size"), sizes, formatAccountSize);
+    renderPresetCard(selectedPreset());
+  }}
+
+  function updatePlans() {{
+    const company = document.getElementById("preset-company").value;
+    const plans = uniqueValues(
+      presetCatalog.filter((preset) => preset.company === company),
+      (preset) => preset.plan
+    ).sort((a, b) => a.localeCompare(b));
+    setOptions(document.getElementById("preset-plan"), plans);
+    updateSizes();
+  }}
+
+  function initializePresetSelector() {{
+    const companySelect = document.getElementById("preset-company");
+    const planSelect = document.getElementById("preset-plan");
+    const sizeSelect = document.getElementById("preset-size");
+    if (!companySelect || !planSelect || !sizeSelect) return;
+
+    const companies = uniqueValues(presetCatalog, (preset) => preset.company)
+      .sort((a, b) => a.localeCompare(b));
+    setOptions(companySelect, companies);
+    companySelect.addEventListener("change", updatePlans);
+    planSelect.addEventListener("change", updateSizes);
+    sizeSelect.addEventListener("change", () => renderPresetCard(selectedPreset()));
+    updatePlans();
+  }}
+
+  initializePresetSelector();
+</script>
+"""
 
 
 def _format_account_size(value: Any) -> str:
