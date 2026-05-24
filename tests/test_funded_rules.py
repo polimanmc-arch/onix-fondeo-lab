@@ -2,11 +2,16 @@ from datetime import date, datetime
 
 from onix_fondeo.models import Account
 from onix_fondeo.rules import (
+    check_funded_consistency,
     check_funded_payout_eligibility,
     check_funded_status,
     check_winning_days_requirement,
     count_winning_days,
+    get_current_consistency_percent,
+    get_next_payout_number,
+    get_payout_tier_key,
     get_required_winning_days,
+    get_tiered_payout_amount,
     process_funded_payout,
 )
 
@@ -256,3 +261,104 @@ def test_winning_days_threshold_none_counts_positive_days():
     assert count_winning_days(account, threshold) == 2
     assert is_satisfied is True
     assert reason is None
+
+
+def test_get_next_payout_number_uses_account_payouts():
+    account = Account(account_id=1, phase="FUNDED")
+
+    assert get_next_payout_number(account) == 1
+
+    account.register_payout(
+        payout_time=datetime(2026, 5, 23),
+        gross_payout=1000,
+        profit_split=0.9,
+    )
+
+    assert get_next_payout_number(account) == 2
+
+
+def test_get_payout_tier_key_maps_fourth_and_later_to_four_plus():
+    assert get_payout_tier_key(1) == "1"
+    assert get_payout_tier_key(2) == "2"
+    assert get_payout_tier_key(3) == "3"
+    assert get_payout_tier_key(4) == "4_plus"
+    assert get_payout_tier_key(9) == "4_plus"
+
+
+def test_tiered_payout_amount_uses_payout_tiers():
+    account = Account(account_id=1, phase="FUNDED")
+    metadata = {"payout_tiers": {"1": 1500, "2": 2000, "3": 2500, "4_plus": 3000}}
+
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 1500
+
+    account.register_payout(datetime(2026, 5, 23), 1500, 0.9)
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 2000
+
+    account.register_payout(datetime(2026, 5, 24), 2000, 0.9)
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 2500
+
+    account.register_payout(datetime(2026, 5, 25), 2500, 0.9)
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 3000
+
+
+def test_tiered_payout_amount_uses_first_and_second_plus_maximums():
+    account = Account(account_id=1, phase="FUNDED")
+    metadata = {
+        "payout_1_maximum": 1000,
+        "payout_2_plus_maximum": 1500,
+    }
+
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 1000
+
+    account.register_payout(datetime(2026, 5, 23), 1000, 0.9)
+
+    assert get_tiered_payout_amount(account, funded_rules(), metadata) == 1500
+
+
+def test_consistency_progression_uses_next_payout_number():
+    account = Account(account_id=1, phase="FUNDED")
+    metadata = {"consistency_progression_post_2025_09_12": [0.2, 0.25, 0.3]}
+
+    assert get_current_consistency_percent(account, metadata) == 0.2
+
+    account.register_payout(datetime(2026, 5, 23), 1000, 0.9)
+    assert get_current_consistency_percent(account, metadata) == 0.25
+
+    account.register_payout(datetime(2026, 5, 24), 1000, 0.9)
+    assert get_current_consistency_percent(account, metadata) == 0.3
+
+    account.register_payout(datetime(2026, 5, 25), 1000, 0.9)
+    assert get_current_consistency_percent(account, metadata) == 0.3
+
+
+def test_consistency_progression_is_enforced_without_enabled_flag():
+    account = Account(
+        account_id=1,
+        phase="FUNDED",
+        pnl=5000,
+        daily_pnl={date(2026, 5, 23): 1500, date(2026, 5, 24): 3500},
+    )
+    metadata = {"consistency_progression_post_2025_09_12": [0.2, 0.25, 0.3]}
+
+    assert check_funded_consistency(account, funded_rules(), metadata) is False
+
+
+def test_process_funded_payout_uses_tiered_amounts():
+    account = Account(account_id=1, phase="FUNDED", pnl=10000)
+    metadata = {"payout_tiers": {"1": 1500, "2": 2000, "3": 2500, "4_plus": 3000}}
+
+    first_payout = process_funded_payout(
+        account,
+        payout_time=datetime(2026, 5, 23),
+        funded_rules=funded_rules(),
+        metadata=metadata,
+    )
+    second_payout = process_funded_payout(
+        account,
+        payout_time=datetime(2026, 5, 24),
+        funded_rules=funded_rules(),
+        metadata=metadata,
+    )
+
+    assert first_payout.gross_payout == 1500
+    assert second_payout.gross_payout == 2000

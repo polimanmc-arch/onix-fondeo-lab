@@ -143,6 +143,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     funded_account,
                     payout_time=trade.exit_time,
                     funded_rules=funded_rules,
+                    metadata=metadata,
                 )
                 payouts.append(payout)
                 business_events.append(

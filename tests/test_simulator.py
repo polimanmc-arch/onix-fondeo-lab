@@ -219,3 +219,60 @@ def test_simulate_funding_logs_winning_days_payout_block():
         results["trade_log"][0]["StatusReason"]
         == "Winning days requirement not satisfied: 1/2"
     )
+
+
+def test_simulate_funding_processes_tiered_funded_payouts():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 5000,
+            },
+            {
+                "TradeID": 2,
+                "EntryTime": datetime(2026, 5, 21, 9, 30),
+                "ExitTime": datetime(2026, 5, 21, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 3000,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 1000,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+        "metadata": {
+            "payout_tiers": {
+                "1": 1500,
+                "2": 2000,
+                "3": 2500,
+                "4_plus": 3000,
+            },
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert [payout.gross_payout for payout in results["payouts"]] == [1500, 2000]

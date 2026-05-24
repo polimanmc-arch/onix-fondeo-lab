@@ -115,15 +115,13 @@ def check_funded_consistency(
     funded_rules: dict[str, Any],
     metadata: dict[str, Any],
 ) -> bool:
-    if metadata.get("funded_consistency_enabled") is not True:
+    if (
+        metadata.get("funded_consistency_enabled") is not True
+        and not _has_consistency_progression(metadata)
+    ):
         return True
 
-    consistency_percent = metadata.get("funded_consistency_percent")
-    if consistency_percent is None:
-        progression = metadata.get("consistency_progression_post_2025_09_12")
-        if progression:
-            consistency_percent = progression[0]
-
+    consistency_percent = get_current_consistency_percent(account, metadata)
     if consistency_percent is None:
         return True
 
@@ -135,6 +133,85 @@ def check_funded_consistency(
     best_day = max(account.daily_pnl.values())
     consistency_ratio = best_day / account.pnl
     return consistency_ratio <= consistency_percent
+
+
+def _has_consistency_progression(metadata: dict[str, Any]) -> bool:
+    return bool(
+        metadata.get("consistency_progression_post_2025_09_12")
+        or metadata.get("consistency_progression_post_2025_12_09")
+    )
+
+
+def get_next_payout_number(account: Account) -> int:
+    return len(getattr(account, "payouts", [])) + 1
+
+
+def get_payout_tier_key(payout_number: int) -> str:
+    if payout_number in {1, 2, 3}:
+        return str(payout_number)
+    return "4_plus"
+
+
+def get_tiered_payout_amount(
+    account: Account,
+    funded_rules: dict[str, Any],
+    metadata: dict[str, Any],
+) -> float:
+    payout_number = get_next_payout_number(account)
+    fallback = funded_rules.get("minimum_withdrawable_profit")
+    selected_value = None
+
+    payout_tiers = metadata.get("payout_tiers")
+    if payout_tiers:
+        tier_key = get_payout_tier_key(payout_number)
+        selected_value = payout_tiers.get(tier_key)
+        if selected_value is None and payout_number >= 4:
+            selected_value = payout_tiers.get("4_plus")
+
+    elif (
+        metadata.get("payout_1_maximum") is not None
+        or metadata.get("payout_2_plus_maximum") is not None
+    ):
+        if payout_number == 1:
+            selected_value = metadata.get("payout_1_maximum")
+        else:
+            selected_value = metadata.get("payout_2_plus_maximum")
+
+    elif (
+        metadata.get("payouts_1_to_3_maximum") is not None
+        or metadata.get("payouts_4_to_5_maximum") is not None
+    ):
+        if payout_number <= 3:
+            selected_value = metadata.get("payouts_1_to_3_maximum")
+        else:
+            selected_value = metadata.get("payouts_4_to_5_maximum")
+
+    if selected_value is None:
+        selected_value = fallback
+    if selected_value is None:
+        return 0.0
+
+    return float(selected_value)
+
+
+def get_current_consistency_percent(
+    account: Account,
+    metadata: dict[str, Any],
+) -> float | None:
+    payout_number = get_next_payout_number(account)
+    progression = metadata.get("consistency_progression_post_2025_09_12")
+    if progression is None:
+        progression = metadata.get("consistency_progression_post_2025_12_09")
+
+    if progression:
+        index = min(payout_number - 1, len(progression) - 1)
+        return float(progression[index])
+
+    consistency_percent = metadata.get("funded_consistency_percent")
+    if consistency_percent is None:
+        return None
+
+    return float(consistency_percent)
 
 
 def get_required_winning_days(
@@ -241,8 +318,9 @@ def process_funded_payout(
     account: Account,
     payout_time: Any,
     funded_rules: dict[str, Any],
+    metadata: Optional[dict[str, Any]] = None,
 ) -> Payout:
-    gross_payout = funded_rules["minimum_withdrawable_profit"]
+    gross_payout = get_tiered_payout_amount(account, funded_rules, metadata or {})
     payout = account.register_payout(
         payout_time=payout_time,
         gross_payout=gross_payout,
