@@ -2,6 +2,8 @@ from datetime import date, datetime
 
 from onix_fondeo.models import Account
 from onix_fondeo.rules import (
+    calculate_daily_continuity_payout_amount,
+    check_daily_continuity_eligibility,
     check_funded_consistency,
     check_funded_payout_eligibility,
     check_funded_status,
@@ -12,6 +14,7 @@ from onix_fondeo.rules import (
     get_payout_tier_key,
     get_required_winning_days,
     get_tiered_payout_amount,
+    is_daily_payout_policy,
     process_funded_payout,
 )
 
@@ -362,3 +365,107 @@ def test_process_funded_payout_uses_tiered_amounts():
 
     assert first_payout.gross_payout == 1500
     assert second_payout.gross_payout == 2000
+
+
+def test_is_daily_payout_policy_detects_supported_metadata_keys():
+    assert is_daily_payout_policy({"funded_payout_policy": "Select Daily"}) is True
+    assert is_daily_payout_policy({"payout_style": "Daily Payout Policy"}) is True
+    assert is_daily_payout_policy({"daily_payouts": True}) is True
+    assert is_daily_payout_policy({"funded_payout_policy": "Select Flex"}) is False
+
+
+def test_daily_continuity_payout_is_zero_when_buffer_is_not_satisfied():
+    account = Account(account_id=1, phase="FUNDED", pnl=3000)
+    metadata = {
+        "payout_cap": 1000,
+        "minimum_payout": 250,
+        "buffer_amount": 2100,
+    }
+
+    assert calculate_daily_continuity_payout_amount(account, metadata) == 0.0
+
+
+def test_daily_continuity_payout_is_zero_when_below_minimum():
+    account = Account(account_id=1, phase="FUNDED", pnl=100)
+    metadata = {
+        "payout_cap": None,
+        "minimum_payout": 250,
+        "buffer_amount": 0,
+    }
+
+    assert calculate_daily_continuity_payout_amount(account, metadata) == 0.0
+
+
+def test_daily_continuity_payout_uses_cap_when_two_times_profit_exceeds_cap():
+    account = Account(account_id=1, phase="FUNDED", pnl=3100)
+    metadata = {
+        "payout_cap": 1000,
+        "minimum_payout": 250,
+        "buffer_amount": 2100,
+    }
+
+    assert calculate_daily_continuity_payout_amount(account, metadata) == 1000
+
+
+def test_daily_payout_policy_can_be_eligible_without_normal_trigger():
+    rules = funded_rules()
+    rules["payout_trigger_profit"] = 999999
+    account = Account(account_id=1, phase="FUNDED", pnl=3100)
+    metadata = {
+        "daily_payouts": True,
+        "payout_cap": 1000,
+        "minimum_payout": 250,
+        "buffer_amount": 2100,
+    }
+
+    is_eligible, reasons = check_funded_payout_eligibility(account, rules, metadata)
+
+    assert is_eligible is True
+    assert reasons == []
+
+
+def test_daily_payout_policy_is_blocked_when_buffer_is_not_satisfied():
+    rules = funded_rules()
+    rules["payout_trigger_profit"] = 0
+    account = Account(account_id=1, phase="FUNDED", pnl=3000)
+    metadata = {
+        "daily_payouts": True,
+        "payout_cap": 1000,
+        "minimum_payout": 250,
+        "buffer_amount": 2100,
+    }
+
+    status, reason = check_funded_status(account, rules, metadata)
+
+    assert status == "ACTIVE"
+    assert reason == "Daily continuity rule not satisfied"
+
+
+def test_check_daily_continuity_eligibility_ignores_non_daily_policies():
+    account = Account(account_id=1, phase="FUNDED", pnl=0)
+
+    is_eligible, reason = check_daily_continuity_eligibility(account, {})
+
+    assert is_eligible is True
+    assert reason is None
+
+
+def test_process_funded_payout_uses_daily_continuity_amount():
+    account = Account(account_id=1, phase="FUNDED", pnl=3100)
+    metadata = {
+        "daily_payouts": True,
+        "payout_cap": 1000,
+        "minimum_payout": 250,
+        "buffer_amount": 2100,
+    }
+    rules = funded_rules()
+    rules["minimum_withdrawable_profit"] = 2000
+
+    payout = process_funded_payout(
+        account,
+        payout_time=datetime(2026, 5, 23),
+        funded_rules=rules,
+        metadata=metadata,
+    )
+
+    assert payout.gross_payout == 1000

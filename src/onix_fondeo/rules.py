@@ -90,6 +90,9 @@ def check_funded_status(
     if "Funded consistency rule not satisfied" in reasons:
         return "ACTIVE", "Funded consistency rule not satisfied"
 
+    if "Daily continuity rule not satisfied" in reasons:
+        return "ACTIVE", "Daily continuity rule not satisfied"
+
     winning_days_reason = _first_reason_starting_with(
         reasons,
         "Winning days requirement not satisfied",
@@ -157,6 +160,9 @@ def get_tiered_payout_amount(
     funded_rules: dict[str, Any],
     metadata: dict[str, Any],
 ) -> float:
+    if is_daily_payout_policy(metadata):
+        return calculate_daily_continuity_payout_amount(account, metadata)
+
     payout_number = get_next_payout_number(account)
     fallback = funded_rules.get("minimum_withdrawable_profit")
     selected_value = None
@@ -212,6 +218,51 @@ def get_current_consistency_percent(
         return None
 
     return float(consistency_percent)
+
+
+def is_daily_payout_policy(metadata: dict[str, Any]) -> bool:
+    return (
+        metadata.get("funded_payout_policy") == "Select Daily"
+        or metadata.get("payout_style") == "Daily Payout Policy"
+        or metadata.get("daily_payouts") is True
+    )
+
+
+def calculate_daily_continuity_payout_amount(
+    account: Account,
+    metadata: dict[str, Any],
+) -> float:
+    cycle_profit = account.pnl
+    payout_cap = metadata.get("payout_cap")
+    minimum_payout = metadata.get("minimum_payout", 0)
+    buffer_amount = metadata.get("buffer_amount", 0)
+
+    if cycle_profit <= 0:
+        return 0.0
+
+    calculated = cycle_profit * 2
+    gross_payout = min(calculated, payout_cap) if payout_cap is not None else calculated
+
+    if gross_payout < minimum_payout:
+        return 0.0
+    if account.pnl < buffer_amount + gross_payout:
+        return 0.0
+
+    return float(gross_payout)
+
+
+def check_daily_continuity_eligibility(
+    account: Account,
+    metadata: dict[str, Any],
+) -> tuple[bool, str | None]:
+    if not is_daily_payout_policy(metadata):
+        return True, None
+
+    payout_amount = calculate_daily_continuity_payout_amount(account, metadata)
+    if payout_amount <= 0:
+        return False, "Daily continuity rule not satisfied"
+
+    return True, None
 
 
 def get_required_winning_days(
@@ -295,9 +346,15 @@ def check_funded_payout_eligibility(
 ) -> tuple[bool, list[str]]:
     reasons = []
 
-    if account.pnl < funded_rules["payout_trigger_profit"]:
-        reasons.append("Payout trigger not reached")
-        return False, reasons
+    if is_daily_payout_policy(metadata):
+        daily_ok, daily_reason = check_daily_continuity_eligibility(account, metadata)
+        if not daily_ok:
+            reasons.append(str(daily_reason))
+            return False, reasons
+    else:
+        if account.pnl < funded_rules["payout_trigger_profit"]:
+            reasons.append("Payout trigger not reached")
+            return False, reasons
 
     if not check_funded_consistency(account, funded_rules, metadata):
         reasons.append("Funded consistency rule not satisfied")

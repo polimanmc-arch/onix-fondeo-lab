@@ -276,3 +276,96 @@ def test_simulate_funding_processes_tiered_funded_payouts():
     results = simulate_funding(trades, config)
 
     assert [payout.gross_payout for payout in results["payouts"]] == [1500, 2000]
+
+
+def test_simulate_funding_logs_daily_continuity_payout_block():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 3000,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 0,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+        "metadata": {
+            "daily_payouts": True,
+            "payout_cap": 1000,
+            "minimum_payout": 250,
+            "buffer_amount": 2100,
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert len(results["payouts"]) == 0
+    assert results["trade_log"][0]["StatusReason"] == "Daily continuity rule not satisfied"
+
+
+def test_simulate_funding_processes_daily_continuity_payout_amount():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 3100,
+            },
+        ]
+    )
+    config = {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 2000,
+            "payout_trigger_profit": 999999,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+        "metadata": {
+            "daily_payouts": True,
+            "payout_cap": 1000,
+            "minimum_payout": 250,
+            "buffer_amount": 2100,
+        },
+    }
+
+    results = simulate_funding(trades, config)
+
+    assert [payout.gross_payout for payout in results["payouts"]] == [1000]
