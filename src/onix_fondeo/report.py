@@ -79,6 +79,44 @@ COMPARISON_COLUMNS = [
     "total_payouts",
 ]
 
+OPTIMIZATION_COLUMNS = [
+    "run_id",
+    "preset_id",
+    "company",
+    "plan",
+    "account_name",
+    "account_size",
+    "strategy",
+    "stoch_k_period",
+    "stoch_d_period",
+    "oversold",
+    "overbought",
+    "signal_mode",
+    "use_d_confirmation",
+    "min_k_d_gap",
+    "cooldown_bars",
+    "stop_loss_points",
+    "take_profit_points",
+    "total_trades",
+    "win_rate",
+    "net_pnl",
+    "profit_factor",
+    "average_trade",
+    "max_consecutive_wins",
+    "max_consecutive_losses",
+    "total_evaluations",
+    "passed_evaluations",
+    "pass_rate",
+    "funded_with_payout",
+    "payout_rate_on_evaluations",
+    "total_evaluation_cost",
+    "total_net_payout",
+    "net_business_pnl",
+    "roi",
+    "expected_value_per_evaluation",
+    "total_payouts",
+]
+
 
 def accounts_to_dataframe(accounts: list[Account]) -> pd.DataFrame:
     rows = []
@@ -204,6 +242,276 @@ def export_comparison_results(
     )
 
     return file_paths
+
+
+def export_optimization_results(
+    rows: list[dict[str, Any]],
+    output_dir: str | Path = "data/output",
+) -> dict[str, Path]:
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    file_paths = {
+        "optimization_results": output_path / "optimization_results.csv",
+        "optimization_report": output_path / "optimization_report.html",
+    }
+
+    pd.DataFrame(rows, columns=OPTIMIZATION_COLUMNS).to_csv(
+        file_paths["optimization_results"],
+        index=False,
+    )
+    _generate_optimization_html_report(rows, file_paths["optimization_report"])
+    return file_paths
+
+
+def _generate_optimization_html_report(
+    rows: list[dict[str, Any]],
+    file_path: Path,
+) -> None:
+    generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    sorted_rows = sorted(
+        rows,
+        key=lambda row: row.get("net_business_pnl", 0) or 0,
+        reverse=True,
+    )
+    top_rows = sorted_rows[:25]
+    best_business = _best_row(rows, "net_business_pnl")
+    best_roi = _best_row(rows, "roi")
+    best_strategy = _best_row(rows, "net_pnl")
+
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Onix Fondeo Lab - Strategy Optimization Report</title>
+  <style>
+    body {{
+      margin: 0;
+      background: #ffffff;
+      color: #172033;
+      font-family: Arial, Helvetica, sans-serif;
+      line-height: 1.45;
+    }}
+    main {{
+      max-width: 1280px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }}
+    h1 {{ margin: 0 0 4px; font-size: 30px; }}
+    h2 {{ margin: 30px 0 12px; font-size: 20px; }}
+    .timestamp {{ margin: 0 0 24px; color: #64748b; font-size: 14px; }}
+    .cards {{
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 12px;
+    }}
+    .card {{
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 14px 16px;
+      background: #f8fafc;
+    }}
+    .card-label {{
+      color: #64748b;
+      font-size: 12px;
+      text-transform: uppercase;
+    }}
+    .card-value {{ margin-top: 6px; font-size: 18px; font-weight: 700; }}
+    .positive {{ color: #047857; font-weight: 700; }}
+    .negative {{ color: #b91c1c; font-weight: 700; }}
+    table {{
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid #e2e8f0;
+      font-size: 13px;
+    }}
+    th, td {{
+      padding: 9px 10px;
+      border-bottom: 1px solid #e2e8f0;
+      text-align: left;
+      white-space: nowrap;
+    }}
+    th {{ background: #f1f5f9; color: #334155; font-weight: 700; }}
+    tr:nth-child(even) td {{ background: #f8fafc; }}
+    .table-wrap {{ overflow-x: auto; }}
+    .empty {{ color: #64748b; }}
+    .bar-list {{
+      display: grid;
+      gap: 10px;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 16px;
+      background: #ffffff;
+    }}
+    .bar-row {{
+      display: grid;
+      grid-template-columns: minmax(260px, 360px) 1fr minmax(90px, auto);
+      gap: 12px;
+      align-items: center;
+    }}
+    .bar-label {{ color: #334155; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }}
+    .bar-track {{ height: 16px; border-radius: 999px; background: #e2e8f0; overflow: hidden; }}
+    .bar-fill {{ height: 100%; min-width: 2px; border-radius: 999px; background: #2563eb; }}
+    @media (max-width: 760px) {{ .bar-row {{ grid-template-columns: 1fr; }} }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Onix Fondeo Lab - Strategy Optimization Report</h1>
+    <p class="timestamp">Generated: {escape(generated_at)}</p>
+    <div class="cards">
+      {_optimization_summary_card("Total Optimization Rows", len(rows), "number")}
+      {_optimization_best_card("Best by Net Business PnL", best_business, "net_business_pnl", "money")}
+      {_optimization_best_card("Best by ROI", best_roi, "roi", "percent")}
+      {_optimization_best_card("Best by Strategy Net PnL", best_strategy, "net_pnl", "money")}
+    </div>
+
+    <h2>Net Business PnL</h2>
+    {_optimization_bar_html(top_rows, "net_business_pnl", "money")}
+
+    <h2>ROI</h2>
+    {_optimization_bar_html(top_rows, "roi", "percent")}
+
+    <h2>Top 25 Rows by Net Business PnL</h2>
+    <div class="table-wrap">
+      {_optimization_table_html(top_rows)}
+    </div>
+  </main>
+</body>
+</html>
+"""
+    file_path.write_text(html, encoding="utf-8")
+
+
+def _best_row(
+    rows: list[dict[str, Any]],
+    field_name: str,
+) -> dict[str, Any] | None:
+    if not rows:
+        return None
+    return max(rows, key=lambda row: row.get(field_name, 0) or 0)
+
+
+def _optimization_summary_card(label: str, value: Any, value_type: str) -> str:
+    return (
+        '<div class="card">'
+        f'<div class="card-label">{escape(label)}</div>'
+        f'<div class="card-value {_number_class(value)}">'
+        f'{_format_metric_value(value, value_type)}'
+        "</div></div>"
+    )
+
+
+def _optimization_best_card(
+    label: str,
+    row: dict[str, Any] | None,
+    field_name: str,
+    value_type: str,
+) -> str:
+    if row is None:
+        value = 0
+        detail = "No rows"
+    else:
+        value = row.get(field_name, 0)
+        detail = f"{row.get('preset_id')} | run {row.get('run_id')}"
+
+    return (
+        '<div class="card">'
+        f'<div class="card-label">{escape(label)}</div>'
+        f'<div class="card-value {_number_class(value)}">'
+        f'{_format_metric_value(value, value_type)}'
+        "</div>"
+        f'<div class="timestamp">{escape(detail)}</div>'
+        "</div>"
+    )
+
+
+def _optimization_bar_html(
+    rows: list[dict[str, Any]],
+    field_name: str,
+    value_type: str,
+) -> str:
+    if not rows:
+        return '<p class="empty">No optimization rows to chart.</p>'
+
+    max_abs = max(abs(float(row.get(field_name, 0) or 0)) for row in rows)
+    bars = []
+    for row in rows:
+        value = float(row.get(field_name, 0) or 0)
+        width = 0.0 if max_abs == 0 else abs(value) / max_abs * 100
+        label = (
+            f"run {row.get('run_id')} | {row.get('preset_id')} | "
+            f"{row.get('signal_mode')} SL{row.get('stop_loss_points')} "
+            f"TP{row.get('take_profit_points')}"
+        )
+        bars.append(
+            (
+                '<div class="bar-row">'
+                f'<div class="bar-label">{escape(label)}</div>'
+                '<div class="bar-track">'
+                f'<div class="bar-fill" style="width: {width:.2f}%;"></div>'
+                "</div>"
+                f'<div class="{_number_class(value)}">'
+                f"{_format_metric_value(value, value_type)}</div>"
+                "</div>"
+            )
+        )
+    return f'<div class="bar-list">{"".join(bars)}</div>'
+
+
+def _optimization_table_html(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No optimization rows to display.</p>'
+
+    header = "".join(f"<th>{escape(column)}</th>" for column in OPTIMIZATION_COLUMNS)
+    table_rows = []
+    numeric_columns = {
+        "net_pnl",
+        "profit_factor",
+        "average_trade",
+        "total_evaluation_cost",
+        "total_net_payout",
+        "net_business_pnl",
+        "roi",
+        "expected_value_per_evaluation",
+    }
+    for row in rows:
+        cells = []
+        for column in OPTIMIZATION_COLUMNS:
+            value = row.get(column)
+            css_class = _number_class(value) if column in numeric_columns else ""
+            class_attr = f' class="{css_class}"' if css_class else ""
+            cells.append(
+                f"<td{class_attr}>{escape(_format_optimization_cell(column, value))}</td>"
+            )
+        table_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        f"<table><thead><tr>{header}</tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
+    )
+
+
+def _format_optimization_cell(column: str, value: Any) -> str:
+    if value is None:
+        return ""
+    if column in {"win_rate", "pass_rate", "payout_rate_on_evaluations", "roi"}:
+        return format_percent(float(value))
+    if column in {
+        "net_pnl",
+        "average_trade",
+        "total_evaluation_cost",
+        "total_net_payout",
+        "net_business_pnl",
+        "expected_value_per_evaluation",
+    }:
+        return _format_dollar(float(value))
+    if column == "profit_factor" and value == float("inf"):
+        return "inf"
+    if isinstance(value, float):
+        return f"{value:.4f}"
+    return str(value)
 
 
 def _generate_comparison_html_report(

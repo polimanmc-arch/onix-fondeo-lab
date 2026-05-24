@@ -164,6 +164,24 @@ Run stochastic zone mode with %D confirmation:
 PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/sample_NQ_1m.csv --strategy stochastic --stoch-signal-mode zone --stoch-use-d-confirmation --stoch-min-k-d-gap 2 --stoch-cooldown-bars 5 --preset tradeify_growth_50k
 ```
 
+Run stochastic optimization on one preset:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/sample_NQ_1m.csv --preset tradeify_growth_50k --max-optimization-runs 20
+```
+
+Compare stochastic optimization across presets:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/sample_NQ_1m.csv --compare tradeify_growth_50k lucid_trading_lucidflex_50k --max-optimization-runs 20
+```
+
+After optimization, open:
+
+```text
+data/output/optimization_report.html
+```
+
 Compare multiple presets:
 
 ```bash

@@ -12,7 +12,12 @@ from onix_fondeo.loader import (
 )
 from onix_fondeo.market_data import load_ohlc_data
 from onix_fondeo.metrics import calculate_business_metrics
-from onix_fondeo.report import export_comparison_results, export_results
+from onix_fondeo.optimizer import run_stochastic_optimization
+from onix_fondeo.report import (
+    export_comparison_results,
+    export_optimization_results,
+    export_results,
+)
 from onix_fondeo.simulator import simulate_funding
 from onix_fondeo.strategy_metrics import (
     calculate_strategy_metrics,
@@ -28,6 +33,10 @@ def main():
 
     if args.list_presets:
         print_presets()
+        return
+
+    if args.optimize_strategy == "stochastic":
+        run_stochastic_optimization_mode(args)
         return
 
     trades, strategy_metrics = load_or_generate_trades(args)
@@ -140,6 +149,16 @@ def parse_args() -> argparse.Namespace:
         choices=["random", "stochastic"],
         help="Strategy to use with --market-data. Defaults to random.",
     )
+    parser.add_argument(
+        "--optimize-strategy",
+        choices=["stochastic"],
+        help="Run strategy optimization mode.",
+    )
+    parser.add_argument(
+        "--max-optimization-runs",
+        type=int,
+        help="Limit the number of strategy parameter sets in optimization mode.",
+    )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
     parser.add_argument(
@@ -245,6 +264,81 @@ def parse_args() -> argparse.Namespace:
         help='Optional strategy end time, for example "15:30".',
     )
     return parser.parse_args()
+
+
+def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
+    if not args.market_data:
+        print("\n--market-data is required for strategy optimization.")
+        return
+    if not args.preset and not args.compare:
+        print("\nStrategy optimization requires --preset or --compare.")
+        return
+
+    presets = _load_runnable_presets_for_request(args)
+    if not presets:
+        print("\nNo runnable presets available for optimization.")
+        return
+
+    ohlc = load_ohlc_data(args.market_data, symbol=args.symbol)
+    rows = run_stochastic_optimization(
+        ohlc=ohlc,
+        presets=presets,
+        base_args={
+            "symbol": args.symbol,
+            "quantity": args.quantity,
+            "point_value": args.point_value,
+            "commission_per_side": args.commission_per_side,
+            "max_holding_minutes": args.max_holding_minutes,
+            "same_bar_exit_policy": args.same_bar_exit_policy,
+        },
+        max_runs=args.max_optimization_runs,
+    )
+    exported_files = export_optimization_results(rows)
+    top_rows = sorted(
+        rows,
+        key=lambda row: row.get("net_business_pnl", 0) or 0,
+        reverse=True,
+    )
+
+    print("\nOptimization completed.")
+    print(f"Rows: {len(rows)}")
+    if top_rows:
+        best = top_rows[0]
+        print("\nBest by Net Business PnL:")
+        print(
+            f"{best['preset_id']} | run {best['run_id']} | "
+            f"{best['net_business_pnl']:.2f} | ROI {best['roi']:.2%}"
+        )
+
+    print("\nExported files:")
+    print(f"- {exported_files['optimization_results']}")
+    print(f"- {exported_files['optimization_report']}")
+
+
+def _load_runnable_presets_for_request(args: argparse.Namespace) -> list[dict]:
+    preset_ids = args.compare if args.compare else [args.preset]
+    presets = []
+
+    for preset_id in preset_ids:
+        try:
+            preset = load_preset(preset_id)
+        except ValueError as error:
+            print(f"\nSkipping preset: {preset_id}")
+            print(error)
+            continue
+
+        is_runnable, missing_fields = validate_preset_is_runnable(preset)
+        if not is_runnable:
+            print(f"\nSkipping preset: {preset_id}")
+            print("Preset is not runnable")
+            print("Missing fields:")
+            for field_name in missing_fields:
+                print(f"- {field_name}")
+            continue
+
+        presets.append(preset)
+
+    return presets
 
 
 def build_strategy_from_args(args: argparse.Namespace):
