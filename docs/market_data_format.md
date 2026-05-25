@@ -17,6 +17,20 @@ The expected input is a CSV file with one row per bar.
 - `Volume`
 - `Symbol`
 
+## Supported Column Aliases
+
+The loader normalizes common vendor and NinjaTrader-style column names:
+
+- `Time`, `Date`, `Datetime`, `Timestamp` -> `DateTime`
+- `O` -> `Open`
+- `H` -> `High`
+- `L` -> `Low`
+- `C`, `Last` -> `Close`
+- `Vol` -> `Volume`
+
+Column-name whitespace is stripped before alias matching. Unknown columns are
+preserved.
+
 ## DateTime Format
 
 Use this format:
@@ -36,6 +50,24 @@ Example:
 `Open`, `High`, `Low`, and `Close` must be numeric.
 
 If `Volume` is provided, it must also be numeric.
+
+## Data Quality Rules
+
+Rows must satisfy basic OHLC consistency:
+
+- `High` must be greater than or equal to both `Open` and `Close`.
+- `Low` must be less than or equal to both `Open` and `Close`.
+- `DateTime` must be parseable.
+- Price fields must be numeric.
+
+Duplicate `DateTime` rows are dropped by default when loading data, keeping the
+last occurrence.
+
+If a `timezone` is provided to the loader, it is stored in
+`df.attrs["timezone"]`. Timezone conversion is not performed yet.
+
+Futures session handling, such as official exchange session boundaries, will be
+added later.
 
 ## Example
 

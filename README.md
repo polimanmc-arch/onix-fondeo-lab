@@ -73,6 +73,10 @@ The OHLC input format is documented in:
 docs/market_data_format.md
 ```
 
+Real OHLC data can come from NinjaTrader or another futures data vendor as long
+as it includes the required columns or one of the supported aliases documented
+above.
+
 Current strategies:
 
 - Random Entry Strategy: a reproducible benchmark strategy that creates random
