@@ -84,6 +84,10 @@ Real OHLC data can come from NinjaTrader or another futures data vendor as long
 as it includes the required columns or one of the supported aliases documented
 above.
 
+Download full 1-minute futures data when possible. Use CLI time filters, such
+as `--strategy-start-time` and `--strategy-end-time`, to decide when strategies
+are allowed to trade.
+
 Current strategies:
 
 - Random Entry Strategy: a reproducible benchmark strategy that creates random

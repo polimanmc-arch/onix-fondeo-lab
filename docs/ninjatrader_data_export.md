@@ -26,6 +26,29 @@ Example file names:
 - `ES_1m.csv`
 - `MES_1m.csv`
 
+## Recommended Data Philosophy
+
+When possible, export/download all available 1-minute futures trading hours.
+
+- Store full ETH/session data.
+- Do not pre-filter overnight, RTH, ETH, or custom session candles before saving.
+- Apply trading filters later inside Onix Fondeo Lab.
+
+Why this matters:
+
+- You can test RTH, ETH, overnight, custom sessions, and funding-specific
+  trading windows from the same raw file.
+- You avoid re-downloading data for every new test.
+- Optimization runs can compare different trading windows more flexibly.
+
+Example runtime filters:
+
+```bash
+--strategy-start-time 09:30 --strategy-end-time 11:30
+--strategy-start-time 16:35 --strategy-end-time 18:30
+--strategy-start-time 18:00 --strategy-end-time 23:00
+```
+
 ## Required Columns
 
 The preferred column names are:
@@ -72,7 +95,8 @@ instructions.
 3. Select the futures instrument, for example `NQ` or `MNQ`.
 4. Select minute data.
 5. Choose the date range you want to test.
-6. Export the data as CSV.
+6. Export the data as CSV. When possible, export all available trading hours
+   rather than only RTH.
 7. Rename the file, for example `NQ_1m.csv`.
 8. Move it to:
 

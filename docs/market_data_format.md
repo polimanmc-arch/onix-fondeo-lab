@@ -4,6 +4,26 @@ Onix Fondeo Lab can generate simulated trades from 1-minute OHLC market data.
 
 The expected input is a CSV file with one row per bar.
 
+## Data Philosophy
+
+When possible, export and store all available 1-minute futures trading hours.
+
+- Store full ETH/session data.
+- Do not pre-filter overnight, RTH, ETH, or custom session candles before saving.
+- Apply trading time filters at strategy/backtest runtime.
+
+This keeps the raw market data reusable. You can test RTH, ETH, overnight,
+custom sessions, and funding-specific trading windows without downloading a new
+file for every experiment. It also makes optimization more flexible.
+
+Example runtime filters:
+
+```bash
+--strategy-start-time 09:30 --strategy-end-time 11:30
+--strategy-start-time 16:35 --strategy-end-time 18:30
+--strategy-start-time 18:00 --strategy-end-time 23:00
+```
+
 ## Required Columns
 
 - `DateTime`
@@ -68,6 +88,9 @@ If a `timezone` is provided to the loader, it is stored in
 
 Futures session handling, such as official exchange session boundaries, will be
 added later.
+
+The loader does not remove candles by time of day. It reads, normalizes,
+validates, sorts, and returns the full OHLC dataset.
 
 ## Example
 

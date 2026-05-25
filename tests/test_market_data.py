@@ -167,3 +167,41 @@ def test_load_ohlc_data_stores_timezone_attr(tmp_path: Path):
 
     assert ohlc.attrs["timezone"] == "America/New_York"
     assert ohlc.iloc[0]["Symbol"] == "NQ"
+
+
+def test_load_ohlc_data_keeps_rows_from_different_times_of_day(tmp_path: Path):
+    file_path = tmp_path / "full_session.csv"
+    pd.DataFrame(
+        [
+            {
+                "DateTime": "2026-05-20 09:30:00",
+                "Open": 100,
+                "High": 101,
+                "Low": 99,
+                "Close": 100,
+            },
+            {
+                "DateTime": "2026-05-20 16:35:00",
+                "Open": 101,
+                "High": 102,
+                "Low": 100,
+                "Close": 101,
+            },
+            {
+                "DateTime": "2026-05-20 18:00:00",
+                "Open": 102,
+                "High": 103,
+                "Low": 101,
+                "Close": 102,
+            },
+        ]
+    ).to_csv(file_path, index=False)
+
+    ohlc = load_ohlc_data(str(file_path))
+
+    assert len(ohlc) == 3
+    assert [value.strftime("%H:%M") for value in ohlc["DateTime"]] == [
+        "09:30",
+        "16:35",
+        "18:00",
+    ]
