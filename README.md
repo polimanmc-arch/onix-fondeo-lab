@@ -73,6 +73,13 @@ The OHLC input format is documented in:
 docs/market_data_format.md
 ```
 
+A practical guide for exporting/preparing real futures data from NinjaTrader or
+another platform is available at:
+
+```text
+docs/ninjatrader_data_export.md
+```
+
 Real OHLC data can come from NinjaTrader or another futures data vendor as long
 as it includes the required columns or one of the supported aliases documented
 above.
