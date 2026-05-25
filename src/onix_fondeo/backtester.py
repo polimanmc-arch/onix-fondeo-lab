@@ -33,6 +33,7 @@ def backtest_strategy(
     max_holding_minutes: int = 60,
     commission_per_side: float = 0.0,
     same_bar_exit_policy: str = "conservative",
+    force_close_time: str | None = None,
 ) -> pd.DataFrame:
     data = ohlc.sort_values("DateTime").reset_index(drop=True)
     signals = sorted(strategy.generate_signals(data), key=lambda signal: signal.signal_time)
@@ -62,6 +63,7 @@ def backtest_strategy(
             max_holding_minutes=max_holding_minutes,
             commission_per_side=commission_per_side,
             same_bar_exit_policy=same_bar_exit_policy,
+            force_close_time=force_close_time,
             strategy_name=getattr(strategy, "name", strategy.__class__.__name__),
         )
         trades.append(trade["row"])
@@ -90,6 +92,7 @@ def _simulate_trade(
     max_holding_minutes: int,
     commission_per_side: float,
     same_bar_exit_policy: str,
+    force_close_time: str | None,
     strategy_name: str,
 ) -> dict[str, Any]:
     entry_bar = data.iloc[entry_index]
@@ -108,11 +111,13 @@ def _simulate_trade(
     exit_price = float(entry_bar["Close"])
     exit_reason = "END_OF_DATA"
     deadline = pd.Timestamp(entry_time) + pd.Timedelta(minutes=max_holding_minutes)
+    force_close_clock = _parse_time(force_close_time)
 
     for index in range(entry_index, len(data)):
         bar = data.iloc[index]
         exit_index = index
         exit_time = bar["DateTime"]
+        is_force_close_bar = _is_at_or_after_time(exit_time, force_close_clock)
         stop_hit, target_hit = _check_exit_touches(
             direction=direction,
             high=float(bar["High"]),
@@ -132,6 +137,10 @@ def _simulate_trade(
         if target_hit:
             exit_price = target_price
             exit_reason = "TP"
+            break
+        if is_force_close_bar:
+            exit_price = float(bar["Open"]) if "Open" in bar else float(bar["Close"])
+            exit_reason = "FORCE_CLOSE"
             break
         if pd.Timestamp(exit_time) >= deadline:
             exit_price = float(bar["Close"])
@@ -193,3 +202,15 @@ def _calculate_gross_pnl(
     if direction == "Long":
         return (exit_price - entry_price) * point_value * quantity
     return (entry_price - exit_price) * point_value * quantity
+
+
+def _parse_time(value: str | None) -> object | None:
+    if value is None:
+        return None
+    return pd.Timestamp(value).time()
+
+
+def _is_at_or_after_time(value: object, force_close_clock: object | None) -> bool:
+    if force_close_clock is None:
+        return False
+    return pd.Timestamp(value).time() >= force_close_clock

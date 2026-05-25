@@ -1,5 +1,6 @@
 import pandas as pd
 
+import onix_fondeo.optimizer as optimizer
 from onix_fondeo.optimizer import (
     build_stochastic_parameter_grid,
     run_stochastic_optimization,
@@ -70,6 +71,41 @@ def test_export_optimization_results_creates_csv_and_html(tmp_path):
         "Onix Fondeo Lab - Strategy Optimization Report"
         in files["optimization_report"].read_text(encoding="utf-8")
     )
+
+
+def test_run_stochastic_optimization_passes_force_close_time(monkeypatch):
+    captured = {}
+
+    def fake_backtest_strategy(**kwargs):
+        captured["force_close_time"] = kwargs["force_close_time"]
+        return pd.DataFrame(
+            columns=[
+                "TradeID",
+                "EntryTime",
+                "ExitTime",
+                "Symbol",
+                "Direction",
+                "Quantity",
+                "EntryPrice",
+                "ExitPrice",
+                "GrossPnL",
+                "Commission",
+                "NetPnL",
+                "ExitReason",
+                "StrategyName",
+            ]
+        )
+
+    monkeypatch.setattr(optimizer, "backtest_strategy", fake_backtest_strategy)
+
+    run_stochastic_optimization(
+        ohlc=_sample_ohlc(),
+        presets=[_preset()],
+        base_args={"force_close_time": "15:55"},
+        max_runs=1,
+    )
+
+    assert captured["force_close_time"] == "15:55"
 
 
 def _sample_ohlc() -> pd.DataFrame:

@@ -49,6 +49,18 @@ Example runtime filters:
 --strategy-start-time 18:00 --strategy-end-time 23:00
 ```
 
+Use `--strategy-start-time` and `--strategy-end-time` to control when strategies
+may enter trades. Use `--force-close-time` to close any still-open trade before
+a risk or session cutoff:
+
+```bash
+--strategy-start-time 09:30 --strategy-end-time 11:30 --force-close-time 15:55
+--strategy-start-time 16:35 --strategy-end-time 18:30 --force-close-time 22:55
+```
+
+No timezone conversion is performed yet. The cutoff time is interpreted against
+the `DateTime` values in the OHLC file.
+
 ## Required Columns
 
 The preferred column names are:

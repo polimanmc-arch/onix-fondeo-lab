@@ -24,6 +24,15 @@ Example runtime filters:
 --strategy-start-time 18:00 --strategy-end-time 23:00
 ```
 
+Use `--strategy-start-time` and `--strategy-end-time` to decide when strategies
+are allowed to open trades. Use `--force-close-time` to close any still-open
+trade before a risk or session cutoff:
+
+```bash
+--strategy-start-time 09:30 --strategy-end-time 11:30 --force-close-time 15:55
+--strategy-start-time 16:35 --strategy-end-time 18:30 --force-close-time 22:55
+```
+
 ## Required Columns
 
 - `DateTime`

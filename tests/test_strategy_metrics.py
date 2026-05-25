@@ -71,6 +71,21 @@ def test_average_holding_time_uses_entry_and_exit_time():
     assert metrics["sl_exits"] == 1
 
 
+def test_strategy_metrics_count_force_close_exits():
+    trades = pd.DataFrame(
+        {
+            "EntryTime": ["2026-05-20 09:30:00"],
+            "ExitTime": ["2026-05-20 15:55:00"],
+            "NetPnL": [25],
+            "ExitReason": ["FORCE_CLOSE"],
+        }
+    )
+
+    metrics = calculate_strategy_metrics(trades)
+
+    assert metrics["force_close_exits"] == 1
+
+
 def test_export_strategy_metrics_writes_json(tmp_path: Path):
     metrics = calculate_strategy_metrics(pd.DataFrame({"NetPnL": [100]}))
 

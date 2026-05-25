@@ -70,6 +70,7 @@ def _args(**overrides) -> Namespace:
         "max_holding_minutes": 60,
         "commission_per_side": 0.0,
         "same_bar_exit_policy": "conservative",
+        "force_close_time": None,
         "random_probability": 0.005,
         "random_seed": 42,
         "stoch_k_period": 14,

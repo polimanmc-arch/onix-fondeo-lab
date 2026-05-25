@@ -81,6 +81,54 @@ def test_backtester_conservative_same_bar_policy_assumes_stop_first():
     assert trade["ExitPrice"] == 95
 
 
+def test_backtester_force_close_time_closes_open_trade():
+    trades = backtest_strategy(
+        _ohlc_for_force_close(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=20,
+        take_profit_points=20,
+        max_holding_minutes=120,
+        force_close_time="09:32",
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["ExitReason"] == "FORCE_CLOSE"
+    assert trade["ExitPrice"] == 102
+
+
+def test_backtester_ignores_force_close_when_none():
+    trades = backtest_strategy(
+        _ohlc_for_force_close(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=20,
+        take_profit_points=20,
+        max_holding_minutes=1,
+        force_close_time=None,
+    )
+
+    assert trades.iloc[0]["ExitReason"] == "TIME"
+
+
+def test_backtester_stop_loss_takes_priority_on_force_close_bar():
+    trades = backtest_strategy(
+        _ohlc_for_force_close_sl_touch(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=5,
+        take_profit_points=20,
+        max_holding_minutes=120,
+        force_close_time="09:32",
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["ExitReason"] == "SL"
+    assert trade["ExitPrice"] == 95
+
+
 def _base_ohlc(high_second_bar: float, low_second_bar: float) -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -112,3 +160,59 @@ def _ohlc_for_long_sl() -> pd.DataFrame:
 
 def _ohlc_for_same_bar_tp_and_sl() -> pd.DataFrame:
     return _base_ohlc(high_second_bar=106, low_second_bar=94)
+
+
+def _ohlc_for_force_close() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:30:00"),
+                "Open": 100,
+                "High": 101,
+                "Low": 99,
+                "Close": 100,
+            },
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:31:00"),
+                "Open": 100,
+                "High": 103,
+                "Low": 99,
+                "Close": 101,
+            },
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:32:00"),
+                "Open": 102,
+                "High": 104,
+                "Low": 101,
+                "Close": 103,
+            },
+        ]
+    )
+
+
+def _ohlc_for_force_close_sl_touch() -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:30:00"),
+                "Open": 100,
+                "High": 101,
+                "Low": 99,
+                "Close": 100,
+            },
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:31:00"),
+                "Open": 100,
+                "High": 103,
+                "Low": 99,
+                "Close": 101,
+            },
+            {
+                "DateTime": pd.Timestamp("2026-05-20 09:32:00"),
+                "Open": 102,
+                "High": 104,
+                "Low": 94,
+                "Close": 96,
+            },
+        ]
+    )

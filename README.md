@@ -179,6 +179,18 @@ Run stochastic zone mode with %D confirmation:
 PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/sample_NQ_1m.csv --strategy stochastic --stoch-signal-mode zone --stoch-use-d-confirmation --stoch-min-k-d-gap 2 --stoch-cooldown-bars 5 --preset tradeify_growth_50k
 ```
 
+Run stochastic entries during the morning and force close near market close:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy stochastic --strategy-start-time 09:30 --strategy-end-time 11:30 --force-close-time 15:55 --preset tradeify_growth_50k
+```
+
+Run a custom evening window:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/NQ_1m.csv --strategy stochastic --strategy-start-time 16:35 --strategy-end-time 18:30 --force-close-time 22:55 --preset tradeify_growth_50k
+```
+
 Run stochastic optimization on one preset:
 
 ```bash

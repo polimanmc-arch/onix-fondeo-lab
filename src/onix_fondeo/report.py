@@ -1369,6 +1369,7 @@ def _strategy_summary_section_html(
         ("SL Exits", strategy_metrics.get("sl_exits", 0)),
         ("Time Exits", strategy_metrics.get("time_exits", 0)),
         ("End of Data Exits", strategy_metrics.get("end_of_data_exits", 0)),
+        ("Force Close Exits", strategy_metrics.get("force_close_exits", 0)),
     ]
 
     summary_cards = "\n".join(

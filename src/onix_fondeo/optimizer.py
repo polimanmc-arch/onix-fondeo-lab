@@ -77,6 +77,7 @@ def run_stochastic_optimization(
                 "same_bar_exit_policy",
                 "conservative",
             ),
+            force_close_time=base_args.get("force_close_time"),
         )
         strategy_metrics = calculate_strategy_metrics(trades)
 

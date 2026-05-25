@@ -197,6 +197,10 @@ def parse_args() -> argparse.Namespace:
         help="Policy when SL and TP are touched in the same bar.",
     )
     parser.add_argument(
+        "--force-close-time",
+        help='Optional time-of-day force close, for example "15:55".',
+    )
+    parser.add_argument(
         "--random-probability",
         type=float,
         default=0.005,
@@ -290,6 +294,7 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
             "commission_per_side": args.commission_per_side,
             "max_holding_minutes": args.max_holding_minutes,
             "same_bar_exit_policy": args.same_bar_exit_policy,
+            "force_close_time": args.force_close_time,
         },
         max_runs=args.max_optimization_runs,
     )
@@ -386,6 +391,7 @@ def load_or_generate_trades(args: argparse.Namespace):
         max_holding_minutes=args.max_holding_minutes,
         commission_per_side=args.commission_per_side,
         same_bar_exit_policy=args.same_bar_exit_policy,
+        force_close_time=args.force_close_time,
     )
 
     output_dir = Path("data/output")

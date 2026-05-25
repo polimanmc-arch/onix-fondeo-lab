@@ -39,6 +39,7 @@ def calculate_strategy_metrics(trades: pd.DataFrame) -> dict[str, Any]:
         "sl_exits": _count_exit_reason(trades, "SL"),
         "time_exits": _count_exit_reason(trades, "TIME"),
         "end_of_data_exits": _count_exit_reason(trades, "END_OF_DATA"),
+        "force_close_exits": _count_exit_reason(trades, "FORCE_CLOSE"),
         "average_holding_minutes": _average_holding_minutes(trades),
     }
 
@@ -79,6 +80,7 @@ def _empty_metrics() -> dict[str, Any]:
         "sl_exits": 0,
         "time_exits": 0,
         "end_of_data_exits": 0,
+        "force_close_exits": 0,
         "average_holding_minutes": 0.0,
     }
 
