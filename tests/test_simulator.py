@@ -166,9 +166,10 @@ def test_simulate_funding_blocks_funded_payout_when_consistency_fails():
     assert results["accounts"][0].status == "ACTIVE"
     assert len(results["payouts"]) == 0
     assert results["trade_log"][0]["StatusAfterTrade"] == "ACTIVE"
+    assert "FUNDED_PAYOUT_TRIGGER_REACHED" in results["trade_log"][0]["StatusReason"]
     assert (
-        results["trade_log"][0]["StatusReason"]
-        == "Funded consistency rule not satisfied"
+        "Funded consistency rule not satisfied"
+        in results["trade_log"][0]["StatusReason"]
     )
 
 
@@ -215,9 +216,10 @@ def test_simulate_funding_logs_winning_days_payout_block():
 
     assert results["accounts"][0].status == "ACTIVE"
     assert len(results["payouts"]) == 0
+    assert "FUNDED_PAYOUT_TRIGGER_REACHED" in results["trade_log"][0]["StatusReason"]
     assert (
-        results["trade_log"][0]["StatusReason"]
-        == "Winning days requirement not satisfied: 1/2"
+        "Winning days requirement not satisfied: 1/2"
+        in results["trade_log"][0]["StatusReason"]
     )
 
 
@@ -442,6 +444,50 @@ def test_simulate_funding_routes_phase_profile_trades_to_evaluation_only():
     assert evaluation_account.trades_count == 1
     assert evaluation_account.pnl == 100
     assert len(results["trade_log"]) == 1
+
+
+def test_simulate_funding_clips_trade_at_evaluation_target():
+    trades = pd.DataFrame(
+        [
+            _trade_row(1, 2850, None),
+            _trade_row(2, 300, None),
+        ]
+    )
+    config = _simple_evaluation_config()
+    config["evaluation"]["profit_target"] = 3000
+    config["simulation"]["continue_after_pass"] = False
+
+    results = simulate_funding(trades, config)
+    evaluation_account = results["accounts"][0]
+    clipped_log = results["trade_log"][1]
+
+    assert evaluation_account.status == "PASSED"
+    assert evaluation_account.pnl == 3000
+    assert clipped_log["OriginalNetPnL"] == 300
+    assert clipped_log["AppliedNetPnL"] == 150
+    assert clipped_log["AccountAwareExitReason"] == "EVALUATION_TARGET_REACHED"
+    assert clipped_log["AccountAwareExitApplied"] is True
+
+
+def test_simulate_funding_clips_trade_at_daily_loss():
+    trades = pd.DataFrame(
+        [
+            _trade_row(1, -900, None),
+            _trade_row(2, -300, None),
+        ]
+    )
+    config = _simple_straight_to_funded_config()
+    config["funded"]["max_daily_loss"] = 1000
+    config["funded"]["max_drawdown"] = 5000
+
+    results = simulate_funding(trades, config)
+    funded_account = results["accounts"][0]
+    clipped_log = results["trade_log"][1]
+
+    assert funded_account.pnl == -1000
+    assert clipped_log["OriginalNetPnL"] == -300
+    assert clipped_log["AppliedNetPnL"] == -100
+    assert clipped_log["AccountAwareExitReason"] == "ACCOUNT_DAILY_LOSS"
 
 
 def test_simulate_funding_straight_to_funded_consumes_funded_phase_profile():

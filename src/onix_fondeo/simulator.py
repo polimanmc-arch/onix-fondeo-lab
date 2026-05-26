@@ -6,6 +6,8 @@ import pandas as pd
 
 from onix_fondeo.models import Account, Payout, Trade
 from onix_fondeo.rules import (
+    apply_account_aware_exit,
+    apply_daily_loss_exit,
     check_evaluation_status,
     check_funded_status,
     get_account_size_from_config,
@@ -88,8 +90,14 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
             and active_eval.status == "ACTIVE"
             and _trade_matches_account_phase(phase_profile, active_eval.phase)
         ):
-            applied_pnl = active_eval.apply_trade(
+            adjusted_trade, account_exit_reason = _account_adjusted_trade(
+                active_eval,
                 trade,
+                evaluation_rules,
+                metadata,
+            )
+            applied_pnl = active_eval.apply_trade(
+                adjusted_trade,
                 daily_profit_cap=evaluation_rules.get("daily_profit_cap"),
             )
             status, reason = check_evaluation_status(
@@ -104,7 +112,15 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 active_eval.result_reason = reason
 
             trade_log.append(
-                _trade_log_row(active_eval, trade, applied_pnl, status, reason)
+                _trade_log_row(
+                    active_eval,
+                    adjusted_trade,
+                    applied_pnl,
+                    status,
+                    _combine_status_reason(account_exit_reason, reason),
+                    original_net_pnl=trade.net_pnl,
+                    account_aware_exit_reason=account_exit_reason,
+                )
             )
 
             if status == "PASSED":
@@ -147,7 +163,13 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
             if not _trade_matches_account_phase(phase_profile, funded_account.phase):
                 continue
 
-            applied_pnl = funded_account.apply_trade(trade)
+            adjusted_trade, account_exit_reason = _account_adjusted_trade(
+                funded_account,
+                trade,
+                funded_rules,
+                metadata,
+            )
+            applied_pnl = funded_account.apply_trade(adjusted_trade)
             status, reason = check_funded_status(
                 funded_account,
                 funded_rules,
@@ -156,21 +178,21 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
 
             if status == "FAILED":
                 funded_account.status = "FAILED"
-                funded_account.ended_at = trade.exit_time
+                funded_account.ended_at = adjusted_trade.exit_time
                 funded_account.result_reason = reason
                 active_funded_accounts.remove(funded_account)
 
             elif status == "PAYOUT_ELIGIBLE":
                 payout = process_funded_payout(
                     funded_account,
-                    payout_time=trade.exit_time,
+                    payout_time=adjusted_trade.exit_time,
                     funded_rules=funded_rules,
                     metadata=metadata,
                 )
                 payouts.append(payout)
                 business_events.append(
                     {
-                        "time": trade.exit_time,
+                        "time": adjusted_trade.exit_time,
                         "type": "PAYOUT",
                         "amount": payout.net_payout,
                         "account_id": funded_account.account_id,
@@ -178,7 +200,15 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                 )
 
             trade_log.append(
-                _trade_log_row(funded_account, trade, applied_pnl, status, reason)
+                _trade_log_row(
+                    funded_account,
+                    adjusted_trade,
+                    applied_pnl,
+                    status,
+                    _combine_status_reason(account_exit_reason, reason),
+                    original_net_pnl=trade.net_pnl,
+                    account_aware_exit_reason=account_exit_reason,
+                )
             )
 
     if current_trade_day is not None:
@@ -208,6 +238,49 @@ def _trade_matches_account_phase(
     if phase_profile is None:
         return True
     return phase_profile == account_phase
+
+
+def _account_adjusted_trade(
+    account: Account,
+    trade: Trade,
+    phase_rules: dict[str, Any],
+    metadata: dict[str, Any],
+) -> tuple[Trade, str | None]:
+    trade_date = _trade_day(trade)
+    adjusted_pnl, daily_reason = apply_daily_loss_exit(
+        account,
+        trade.net_pnl,
+        phase_rules.get("max_daily_loss"),
+        trade_date,
+    )
+    adjusted_pnl, account_reason = apply_account_aware_exit(
+        account,
+        adjusted_pnl,
+        phase_rules,
+        metadata,
+    )
+    reason = daily_reason or account_reason
+    return (
+        Trade(
+            trade_id=trade.trade_id,
+            entry_time=trade.entry_time,
+            exit_time=trade.exit_time,
+            symbol=trade.symbol,
+            direction=trade.direction,
+            quantity=trade.quantity,
+            net_pnl=adjusted_pnl,
+        ),
+        reason,
+    )
+
+
+def _combine_status_reason(
+    account_exit_reason: str | None,
+    status_reason: str | None,
+) -> str | None:
+    if account_exit_reason and status_reason:
+        return f"{account_exit_reason}; {status_reason}"
+    return account_exit_reason or status_reason
 
 
 def _trade_day(trade: Trade) -> Any:
@@ -312,7 +385,10 @@ def _trade_log_row(
     applied_pnl: float,
     status_after_trade: str,
     status_reason: Optional[str] = None,
+    original_net_pnl: Optional[float] = None,
+    account_aware_exit_reason: Optional[str] = None,
 ) -> dict[str, Any]:
+    original = trade.net_pnl if original_net_pnl is None else original_net_pnl
     return {
         "AccountID": account.account_id,
         "Phase": account.phase,
@@ -320,6 +396,10 @@ def _trade_log_row(
         "TradeTime": trade.exit_time,
         "OriginalPnL": trade.net_pnl,
         "AppliedPnL": applied_pnl,
+        "OriginalNetPnL": original,
+        "AppliedNetPnL": trade.net_pnl,
+        "AccountAwareExitReason": account_aware_exit_reason,
+        "AccountAwareExitApplied": account_aware_exit_reason is not None,
         "AccountPnL": account.pnl,
         "StatusAfterTrade": status_after_trade,
         "StatusReason": status_reason,

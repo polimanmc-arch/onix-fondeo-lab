@@ -43,6 +43,10 @@ TRADE_LOG_COLUMNS = [
     "TradeTime",
     "OriginalPnL",
     "AppliedPnL",
+    "OriginalNetPnL",
+    "AppliedNetPnL",
+    "AccountAwareExitReason",
+    "AccountAwareExitApplied",
     "AccountPnL",
     "StatusAfterTrade",
 ]

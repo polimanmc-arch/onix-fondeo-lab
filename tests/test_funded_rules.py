@@ -2,6 +2,8 @@ from datetime import date, datetime
 
 from onix_fondeo.models import Account
 from onix_fondeo.rules import (
+    apply_account_aware_exit,
+    apply_daily_loss_exit,
     calculate_daily_continuity_payout_amount,
     check_daily_continuity_eligibility,
     check_drawdown_breach,
@@ -42,6 +44,86 @@ def test_funded_account_fails_when_max_drawdown_is_breached():
 
     assert status == "FAILED"
     assert reason == "Funded max drawdown breached"
+
+
+def test_apply_account_aware_exit_clips_evaluation_target():
+    account = Account(account_id=1, phase="EVALUATION", pnl=2850)
+
+    adjusted, reason = apply_account_aware_exit(
+        account,
+        300,
+        {"profit_target": 3000, "max_drawdown": 2000},
+    )
+
+    assert adjusted == 150
+    assert reason == "EVALUATION_TARGET_REACHED"
+
+
+def test_apply_account_aware_exit_clips_evaluation_max_loss():
+    account = Account(account_id=1, phase="EVALUATION", pnl=-1900)
+
+    adjusted, reason = apply_account_aware_exit(
+        account,
+        -300,
+        {"profit_target": 3000, "max_drawdown": 2000},
+    )
+
+    assert adjusted == -100
+    assert reason == "ACCOUNT_MAX_LOSS"
+
+
+def test_apply_account_aware_exit_clips_funded_payout_trigger():
+    account = Account(account_id=1, phase="FUNDED", pnl=3900)
+
+    adjusted, reason = apply_account_aware_exit(
+        account,
+        300,
+        {"payout_trigger_profit": 4000, "max_drawdown": 2000},
+    )
+
+    assert adjusted == 100
+    assert reason == "FUNDED_PAYOUT_TRIGGER_REACHED"
+
+
+def test_apply_account_aware_exit_clips_funded_max_loss():
+    account = Account(account_id=1, phase="FUNDED", pnl=-1900)
+
+    adjusted, reason = apply_account_aware_exit(
+        account,
+        -300,
+        {"payout_trigger_profit": 4000, "max_drawdown": 2000},
+    )
+
+    assert adjusted == -100
+    assert reason == "ACCOUNT_MAX_LOSS"
+
+
+def test_apply_account_aware_exit_does_not_adjust_without_threshold_cross():
+    account = Account(account_id=1, phase="EVALUATION", pnl=1000)
+
+    adjusted, reason = apply_account_aware_exit(
+        account,
+        100,
+        {"profit_target": 3000, "max_drawdown": 2000},
+    )
+
+    assert adjusted == 100
+    assert reason is None
+
+
+def test_apply_daily_loss_exit_clips_daily_loss():
+    account = Account(account_id=1, phase="FUNDED")
+    account.daily_pnl[date(2026, 5, 20)] = -900
+
+    adjusted, reason = apply_daily_loss_exit(
+        account,
+        -300,
+        max_daily_loss=1000,
+        trade_date=date(2026, 5, 20),
+    )
+
+    assert adjusted == -100
+    assert reason == "ACCOUNT_DAILY_LOSS"
 
 
 def test_funded_account_becomes_payout_eligible_at_trigger_profit():

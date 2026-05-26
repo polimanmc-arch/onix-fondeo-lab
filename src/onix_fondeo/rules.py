@@ -5,6 +5,60 @@ from typing import Any, Optional
 from onix_fondeo.models import Account, Payout
 
 
+def apply_account_aware_exit(
+    account: Account,
+    trade_net_pnl: float,
+    phase_rules: dict,
+    metadata: Optional[dict[str, Any]] = None,
+) -> tuple[float, str | None]:
+    current_pnl = account.pnl
+    projected_pnl = current_pnl + trade_net_pnl
+
+    if account.phase == "EVALUATION":
+        target = phase_rules.get("profit_target")
+        if (
+            trade_net_pnl > 0
+            and target is not None
+            and current_pnl < target <= projected_pnl
+        ):
+            return float(target - current_pnl), "EVALUATION_TARGET_REACHED"
+
+    if account.phase == "FUNDED":
+        payout_trigger = phase_rules.get("payout_trigger_profit")
+        if (
+            trade_net_pnl > 0
+            and payout_trigger is not None
+            and current_pnl < payout_trigger <= projected_pnl
+        ):
+            return float(payout_trigger - current_pnl), "FUNDED_PAYOUT_TRIGGER_REACHED"
+
+    max_drawdown = phase_rules.get("max_drawdown")
+    if trade_net_pnl < 0 and max_drawdown is not None:
+        loss_floor = -abs(max_drawdown)
+        if projected_pnl <= loss_floor:
+            return float(loss_floor - current_pnl), "ACCOUNT_MAX_LOSS"
+
+    return trade_net_pnl, None
+
+
+def apply_daily_loss_exit(
+    account: Account,
+    trade_net_pnl: float,
+    max_daily_loss: float | None,
+    trade_date: Any,
+) -> tuple[float, str | None]:
+    if max_daily_loss is None or trade_net_pnl >= 0:
+        return trade_net_pnl, None
+
+    current_day_pnl = account.daily_pnl.get(trade_date, 0)
+    projected_day_pnl = current_day_pnl + trade_net_pnl
+    daily_loss_floor = -abs(max_daily_loss)
+    if projected_day_pnl <= daily_loss_floor:
+        return float(daily_loss_floor - current_day_pnl), "ACCOUNT_DAILY_LOSS"
+
+    return trade_net_pnl, None
+
+
 def check_max_drawdown(account: Account, max_drawdown: float) -> bool:
     return account.pnl <= -max_drawdown
 

@@ -318,6 +318,20 @@ settings. Evaluation can be more aggressive to seek passing the account, while
 funded can be more conservative to protect consistency and pursue payouts. This
 is an initial approximation before fully account-aware intratrade exits.
 
+## Account-Aware Exits
+
+The funding simulator can clip trade PnL when an account-level rule is reached:
+
+- evaluation profit target
+- funded payout trigger
+- max drawdown / max loss
+- daily loss limit
+
+This prevents unrealistic overshooting of funding rules in the simulation trade
+log. The adjustment is based on trade-level `NetPnL`, not tick-by-tick
+intratrade path data yet. A future version may integrate account-aware exits
+directly into the OHLC backtester.
+
 Compare presets with bankroll tracking:
 
 ```bash
