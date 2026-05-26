@@ -67,12 +67,11 @@ def sidebar_controls() -> dict[str, Any]:
         st.header("Funding Preset")
         presets = list_presets()
         show_non_runnable = st.checkbox("Show non-runnable presets", value=False)
-        preset_options = _preset_options(presets, show_non_runnable)
-        selected_label = st.selectbox(
-            "Preset",
-            options=list(preset_options.keys()),
-            disabled=not preset_options,
-        )
+        filtered_presets = filter_presets_by_runnable(presets, show_non_runnable)
+        selected_preset = select_funding_preset(filtered_presets)
+        selected_preset_id = selected_preset["preset_id"]
+        selected_preset_runnable = selected_preset["is_runnable"]
+        render_selected_preset_info(selected_preset)
 
         st.header("Strategy")
         strategy_name = st.selectbox("Strategy", options=["random", "stochastic"])
@@ -122,13 +121,17 @@ def sidebar_controls() -> dict[str, Any]:
             step=1,
         )
 
-        run_analysis_button = st.button("Run Analysis", type="primary")
+        run_analysis_button = st.button(
+            "Run Analysis",
+            type="primary",
+            disabled=not selected_preset_runnable,
+        )
 
     return {
         "market_data_path": market_data_path,
         "symbol": symbol,
         "point_value": point_value,
-        "preset_id": preset_options.get(selected_label) if preset_options else None,
+        "preset_id": selected_preset_id,
         "strategy_name": strategy_name,
         "strategy_params": strategy_params,
         "strategy_start_time": _blank_to_none(strategy_start_time),
@@ -406,18 +409,120 @@ def export_app_outputs(
     return files
 
 
-def _preset_options(presets: list[dict[str, Any]], show_non_runnable: bool) -> dict[str, str]:
-    options = {}
-    for preset in presets:
-        is_runnable, _ = validate_preset_is_runnable(preset)
-        if not show_non_runnable and not is_runnable:
-            continue
-        label = (
-            f"{preset.get('company')} | {preset.get('plan')} | "
-            f"{preset.get('account_name')} | {preset.get('preset_id')}"
+def format_account_size(size: Any) -> str:
+    if size is None:
+        return "Unknown"
+    try:
+        numeric_size = int(size)
+    except (TypeError, ValueError):
+        return str(size)
+
+    if numeric_size % 1000 == 0:
+        return f"{numeric_size // 1000}K"
+    return f"{numeric_size:,}"
+
+
+def get_runnable_preset_info(preset: dict[str, Any]) -> dict[str, Any]:
+    is_runnable, missing_fields = validate_preset_is_runnable(preset)
+    preset_info = dict(preset)
+    preset_info["is_runnable"] = is_runnable
+    preset_info["missing_fields"] = missing_fields
+    return preset_info
+
+
+def filter_presets_by_runnable(
+    presets: list[dict[str, Any]],
+    show_non_runnable: bool,
+) -> list[dict[str, Any]]:
+    preset_infos = [get_runnable_preset_info(preset) for preset in presets]
+    if show_non_runnable:
+        return preset_infos
+    return [preset for preset in preset_infos if preset["is_runnable"]]
+
+
+def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
+    if not presets:
+        st.error("No presets are available with the current filter.")
+        st.stop()
+
+    companies = sorted({preset.get("company") or "Unknown" for preset in presets})
+    if not companies:
+        st.error("No preset companies are available.")
+        st.stop()
+
+    selected_company = st.selectbox("Company", options=companies)
+    company_presets = [
+        preset for preset in presets if (preset.get("company") or "Unknown") == selected_company
+    ]
+
+    plans = sorted({preset.get("plan") or "Unknown" for preset in company_presets})
+    if not plans:
+        st.error("No plans are available for the selected company.")
+        st.stop()
+
+    selected_plan = st.selectbox("Plan", options=plans)
+    plan_presets = [
+        preset for preset in company_presets if (preset.get("plan") or "Unknown") == selected_plan
+    ]
+
+    sizes = sorted(
+        {
+            preset.get("account_size")
+            for preset in plan_presets
+            if preset.get("account_size") is not None
+        },
+        key=_account_size_sort_key,
+    )
+    if not sizes:
+        st.error("No account sizes are available for the selected plan.")
+        st.stop()
+
+    size_labels = {format_account_size(size): size for size in sizes}
+    selected_size_label = st.selectbox("Account Size", options=list(size_labels.keys()))
+    selected_size = size_labels[selected_size_label]
+    matches = [
+        preset
+        for preset in plan_presets
+        if preset.get("account_size") == selected_size
+    ]
+
+    if not matches:
+        st.error("No preset matches the selected company, plan and account size.")
+        st.stop()
+    if len(matches) > 1:
+        st.warning("Multiple presets match this selection. Using the first match.")
+
+    return matches[0]
+
+
+def render_selected_preset_info(preset: dict[str, Any]) -> None:
+    st.info(
+        "\n".join(
+            [
+                f"preset_id: {preset.get('preset_id')}",
+                f"company: {preset.get('company')}",
+                f"plan: {preset.get('plan')}",
+                f"account_name: {preset.get('account_name')}",
+                f"account_size: {format_account_size(preset.get('account_size'))}",
+                f"Runnable: {'Yes' if preset.get('is_runnable') else 'No'}",
+                f"Verified: {'Yes' if preset.get('rules_verified') else 'No'}",
+            ]
         )
-        options[label] = preset["preset_id"]
-    return options
+    )
+
+    missing_fields = preset.get("missing_fields", [])
+    if missing_fields:
+        shown_fields = ", ".join(missing_fields[:8])
+        remaining = len(missing_fields) - 8
+        suffix = f" and {remaining} more" if remaining > 0 else ""
+        st.warning(f"Preset is not runnable. Missing fields: {shown_fields}{suffix}.")
+
+
+def _account_size_sort_key(size: Any) -> float:
+    try:
+        return float(size)
+    except (TypeError, ValueError):
+        return float("inf")
 
 
 def _metric_row(items: list[tuple[str, Any]]) -> None:
