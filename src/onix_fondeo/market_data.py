@@ -59,6 +59,78 @@ def load_ohlc_data(
     return ohlc
 
 
+def load_ninjatrader_export(input_path: str, symbol: str) -> pd.DataFrame:
+    full_path = Path(input_path)
+    if not full_path.is_absolute():
+        full_path = PROJECT_ROOT / input_path
+
+    rows = []
+    malformed_lines = []
+    with full_path.open("r", encoding="utf-8") as file:
+        for line_number, raw_line in enumerate(file, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+
+            parts = [part.strip() for part in line.split(";")]
+            if len(parts) != 6:
+                malformed_lines.append(line_number)
+                continue
+
+            rows.append(
+                {
+                    "DateTime": parts[0],
+                    "Open": parts[1],
+                    "High": parts[2],
+                    "Low": parts[3],
+                    "Close": parts[4],
+                    "Volume": parts[5],
+                    "Symbol": symbol,
+                }
+            )
+
+    if malformed_lines:
+        preview = ", ".join(str(line) for line in malformed_lines[:5])
+        raise ValueError(f"Malformed NinjaTrader export rows at line(s): {preview}")
+
+    if not rows:
+        raise ValueError("NinjaTrader export file contains no data rows")
+
+    ohlc = pd.DataFrame(rows)
+    parsed_datetime = pd.to_datetime(
+        ohlc["DateTime"],
+        format="%Y%m%d %H%M%S",
+        errors="coerce",
+    )
+    if parsed_datetime.isna().any():
+        raise ValueError("Invalid NinjaTrader DateTime values found")
+
+    ohlc["DateTime"] = parsed_datetime
+    for column in ["Open", "High", "Low", "Close", "Volume"]:
+        ohlc[column] = pd.to_numeric(ohlc[column], errors="coerce")
+
+    validate_ohlc_dataframe(ohlc)
+    return ohlc.sort_values("DateTime").reset_index(drop=True)
+
+
+def convert_ninjatrader_export_to_csv(
+    input_path: str,
+    output_path: str,
+    symbol: str,
+) -> None:
+    ohlc = load_ninjatrader_export(input_path, symbol)
+
+    full_output_path = Path(output_path)
+    if not full_output_path.is_absolute():
+        full_output_path = PROJECT_ROOT / output_path
+
+    full_output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    output = ohlc.copy()
+    output["DateTime"] = output["DateTime"].dt.strftime("%Y-%m-%d %H:%M:%S")
+    output.to_csv(full_output_path, index=False)
+
+
 def normalize_ohlc_columns(df: pd.DataFrame) -> pd.DataFrame:
     normalized = df.copy()
     stripped_columns = {column: str(column).strip() for column in normalized.columns}

@@ -84,6 +84,11 @@ Real OHLC data can come from NinjaTrader or another futures data vendor as long
 as it includes the required columns or one of the supported aliases documented
 above.
 
+Raw NinjaTrader historical exports in
+`YYYYMMDD HHMMSS;Open;High;Low;Close;Volume` format can be converted to the
+standard project CSV format with `convert_ninjatrader_export_to_csv` from
+`onix_fondeo.market_data`.
+
 Download full 1-minute futures data when possible. Use CLI time filters, such
 as `--strategy-start-time` and `--strategy-end-time`, to decide when strategies
 are allowed to trade.

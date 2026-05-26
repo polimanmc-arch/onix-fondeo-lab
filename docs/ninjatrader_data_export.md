@@ -119,6 +119,40 @@ data/market_data/
 If the exported columns use aliases such as `Time`, `O`, `H`, `L`, `C`, or
 `Vol`, the project loader can normalize them automatically.
 
+## Raw NinjaTrader Historical Export Format
+
+Some NinjaTrader historical exports may be raw semicolon-separated text without
+a header row:
+
+```text
+20260312 040400;24945.25;24949.25;24945.25;24949.25;7
+20260312 040500;24946.5;24954.5;24946.5;24954.5;6
+```
+
+The expected raw field order is:
+
+```text
+YYYYMMDD HHMMSS;Open;High;Low;Close;Volume
+```
+
+Onix Fondeo Lab can convert this raw format into the standard project CSV
+format:
+
+```csv
+DateTime,Open,High,Low,Close,Volume,Symbol
+2026-03-12 04:04:00,24945.25,24949.25,24945.25,24949.25,7,NQ
+```
+
+Example Python one-liner:
+
+```bash
+PYTHONPATH=src python -c "from onix_fondeo.market_data import convert_ninjatrader_export_to_csv; convert_ninjatrader_export_to_csv('data/market_data/NQ_raw.txt', 'data/market_data/NQ_1m.csv', 'NQ')"
+```
+
+A dedicated CLI command may be added later. For now, the converter creates the
+parent output folder if needed, sorts by `DateTime`, validates numeric columns,
+and checks basic OHLC integrity.
+
 ## Data Quality Checklist
 
 Before running a backtest, check that:

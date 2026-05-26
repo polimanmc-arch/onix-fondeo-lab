@@ -4,6 +4,8 @@ import pandas as pd
 import pytest
 
 from onix_fondeo.market_data import (
+    convert_ninjatrader_export_to_csv,
+    load_ninjatrader_export,
     load_ohlc_data,
     normalize_ohlc_columns,
     validate_ohlc_dataframe,
@@ -205,3 +207,82 @@ def test_load_ohlc_data_keeps_rows_from_different_times_of_day(tmp_path: Path):
         "16:35",
         "18:00",
     ]
+
+
+def test_load_ninjatrader_export_parses_raw_format_and_adds_symbol(tmp_path: Path):
+    raw_path = tmp_path / "ninja_export.txt"
+    raw_path.write_text(
+        "\n".join(
+            [
+                "20260312 040500;24946.5;24954.5;24946.5;24954.5;6",
+                "20260312 040400;24945.25;24949.25;24945.25;24949.25;7",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    ohlc = load_ninjatrader_export(str(raw_path), symbol="NQ")
+
+    assert list(ohlc.columns) == [
+        "DateTime",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+        "Symbol",
+    ]
+    assert ohlc.iloc[0]["DateTime"] == pd.Timestamp("2026-03-12 04:04:00")
+    assert ohlc.iloc[0]["Open"] == 24945.25
+    assert ohlc.iloc[0]["Symbol"] == "NQ"
+
+
+def test_convert_ninjatrader_export_to_csv_writes_standard_format(tmp_path: Path):
+    raw_path = tmp_path / "ninja_export.txt"
+    output_path = tmp_path / "converted" / "NQ_1m.csv"
+    raw_path.write_text(
+        "20260312 040400;24945.25;24949.25;24945.25;24949.25;7",
+        encoding="utf-8",
+    )
+
+    convert_ninjatrader_export_to_csv(
+        str(raw_path),
+        str(output_path),
+        symbol="NQ",
+    )
+
+    converted = pd.read_csv(output_path)
+
+    assert list(converted.columns) == [
+        "DateTime",
+        "Open",
+        "High",
+        "Low",
+        "Close",
+        "Volume",
+        "Symbol",
+    ]
+    assert converted.iloc[0]["DateTime"] == "2026-03-12 04:04:00"
+    assert converted.iloc[0]["Symbol"] == "NQ"
+
+
+def test_load_ninjatrader_export_rejects_malformed_rows(tmp_path: Path):
+    raw_path = tmp_path / "bad_export.txt"
+    raw_path.write_text(
+        "20260312 040400;24945.25;24949.25;24945.25;24949.25",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Malformed NinjaTrader export rows"):
+        load_ninjatrader_export(str(raw_path), symbol="NQ")
+
+
+def test_load_ninjatrader_export_rejects_invalid_ohlc_rows(tmp_path: Path):
+    raw_path = tmp_path / "bad_ohlc.txt"
+    raw_path.write_text(
+        "20260312 040400;24945.25;24944.25;24945.25;24949.25;7",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="Invalid OHLC rows found"):
+        load_ninjatrader_export(str(raw_path), symbol="NQ")
