@@ -12,6 +12,7 @@ if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
 import streamlit as st
+import pandas as pd
 
 from onix_fondeo.backtester import backtest_strategy
 from onix_fondeo.bankroll import calculate_bankroll_curve
@@ -306,6 +307,62 @@ def render_outputs(
     required_bankroll: dict[str, Any] | None,
     exported_files: dict[str, Path],
 ) -> None:
+    (
+        overview_tab,
+        strategy_tab,
+        diagnostics_tab,
+        funding_tab,
+        bankroll_tab,
+        risk_tab,
+        trades_tab,
+    ) = st.tabs(
+        [
+            "Overview",
+            "Strategy",
+            "Diagnostics",
+            "Funding",
+            "Bankroll",
+            "Risk",
+            "Trades",
+        ]
+    )
+
+    with overview_tab:
+        st.subheader("Run Overview")
+        _metric_row(
+            [
+                ("Trades", strategy_metrics["total_trades"]),
+                ("Strategy Net PnL", _money(strategy_metrics["net_pnl"])),
+                ("Funding Net PnL", _money(business_metrics["net_business_pnl"])),
+                ("Total Net Payout", _money(business_metrics["total_net_payout"])),
+            ]
+        )
+        st.subheader("Exported Files")
+        for label, path in exported_files.items():
+            st.write(f"{label}: `{path}`")
+
+    with strategy_tab:
+        render_strategy_summary(strategy_metrics)
+
+    with diagnostics_tab:
+        render_diagnostics_tab(trades, strategy_metrics)
+
+    with funding_tab:
+        render_funding_summary(business_metrics)
+
+    with bankroll_tab:
+        render_bankroll_summary(bankroll_result)
+
+    with risk_tab:
+        render_risk_summary(risk_result, required_bankroll)
+        render_streak_summary(streak_analysis)
+
+    with trades_tab:
+        st.subheader("Generated Trades")
+        st.dataframe(trades.head(500), use_container_width=True)
+
+
+def render_strategy_summary(strategy_metrics: dict[str, Any]) -> None:
     st.subheader("Strategy Summary")
     _metric_row(
         [
@@ -325,6 +382,8 @@ def render_outputs(
     if strategy_metrics.get("total_trades", 0) < 30:
         st.warning("Small sample size: strategy metrics may not be reliable.")
 
+
+def render_funding_summary(business_metrics: dict[str, Any]) -> None:
     st.subheader("Funding Summary")
     _metric_row(
         [
@@ -338,37 +397,52 @@ def render_outputs(
         ]
     )
 
-    if bankroll_result is not None:
-        metrics = bankroll_result["metrics"]
-        st.subheader("Bankroll Summary")
-        _metric_row(
-            [
-                ("Initial Bankroll", _money(metrics["initial_bankroll"])),
-                ("Final Bankroll", _money(metrics["final_bankroll"])),
-                ("Lowest Bankroll", _money(metrics["lowest_bankroll"])),
-                ("Ruined", "Yes" if metrics["bankroll_ruined"] else "No"),
-                ("Max Drawdown", _money(metrics["max_bankroll_drawdown"])),
-            ]
-        )
 
-    if risk_result is not None:
-        metrics = risk_result["metrics"]
-        recommended = None if required_bankroll is None else required_bankroll.get(
-            "recommended_bankroll"
-        )
-        st.subheader("Risk of Ruin Summary")
-        _metric_row(
-            [
-                ("Ruin Probability", f"{metrics['ruin_probability']:.2%}"),
-                ("Survival Probability", f"{metrics['survival_probability']:.2%}"),
-                ("Median Final Bankroll", _money(metrics["median_final_bankroll"])),
-                (
-                    "Recommended Bankroll",
-                    "N/A" if recommended is None else _money(recommended),
-                ),
-            ]
-        )
+def render_bankroll_summary(bankroll_result: dict[str, Any] | None) -> None:
+    if bankroll_result is None:
+        st.info("No bankroll was configured for this run.")
+        return
 
+    metrics = bankroll_result["metrics"]
+    st.subheader("Bankroll Summary")
+    _metric_row(
+        [
+            ("Initial Bankroll", _money(metrics["initial_bankroll"])),
+            ("Final Bankroll", _money(metrics["final_bankroll"])),
+            ("Lowest Bankroll", _money(metrics["lowest_bankroll"])),
+            ("Ruined", "Yes" if metrics["bankroll_ruined"] else "No"),
+            ("Max Drawdown", _money(metrics["max_bankroll_drawdown"])),
+        ]
+    )
+
+
+def render_risk_summary(
+    risk_result: dict[str, Any] | None,
+    required_bankroll: dict[str, Any] | None,
+) -> None:
+    if risk_result is None:
+        st.info("No Monte Carlo risk of ruin analysis was run.")
+        return
+
+    metrics = risk_result["metrics"]
+    recommended = None if required_bankroll is None else required_bankroll.get(
+        "recommended_bankroll"
+    )
+    st.subheader("Risk of Ruin Summary")
+    _metric_row(
+        [
+            ("Ruin Probability", f"{metrics['ruin_probability']:.2%}"),
+            ("Survival Probability", f"{metrics['survival_probability']:.2%}"),
+            ("Median Final Bankroll", _money(metrics["median_final_bankroll"])),
+            (
+                "Recommended Bankroll",
+                "N/A" if recommended is None else _money(recommended),
+            ),
+        ]
+    )
+
+
+def render_streak_summary(streak_analysis: dict[str, Any]) -> None:
     st.subheader("Streak Analysis")
     _metric_row(
         [
@@ -387,12 +461,105 @@ def render_outputs(
         ]
     )
 
-    st.subheader("Generated Trades")
-    st.dataframe(trades.head(500), use_container_width=True)
 
-    st.subheader("Exported Files")
-    for label, path in exported_files.items():
-        st.write(f"{label}: `{path}`")
+def render_diagnostics_tab(
+    trades_df: pd.DataFrame,
+    strategy_metrics: dict[str, Any],
+) -> None:
+    if trades_df.empty:
+        st.info("No trades available for diagnostics.")
+        return
+
+    diagnostics = build_trade_diagnostics(trades_df)
+    overtrading = diagnostics["overtrading"]
+    costs = diagnostics["costs"]
+    quality = diagnostics["quality"]
+
+    st.subheader("Overtrading")
+    _metric_row(
+        [
+            ("Total Trades", overtrading["total_trades"]),
+            ("Trading Days", overtrading["unique_trading_days"]),
+            ("Avg Trades / Day", f"{overtrading['average_trades_per_day']:.2f}"),
+            ("Max Trades / Day", overtrading["max_trades_in_one_day"]),
+            ("Avg Trades / Hour", _optional_decimal(overtrading["average_trades_per_hour"])),
+            ("Median Holding", _optional_decimal(overtrading["median_holding_minutes"])),
+        ]
+    )
+
+    st.subheader("Cost Diagnostics")
+    _metric_row(
+        [
+            ("Gross PnL", _money(costs["gross_pnl"])),
+            ("Net PnL", _money(costs["net_pnl"])),
+            ("Total Cost", _money(costs["total_cost"])),
+            ("Cost / Gross Profit", _optional_percent(costs["cost_as_percent_of_gross_profit"])),
+            ("Avg Cost / Trade", _money(costs["average_cost_per_trade"])),
+            ("Commission", _money(costs["total_commission"])),
+            ("Slippage", _money(costs["total_slippage_cost"])),
+            ("Spread", _money(costs["total_spread_cost"])),
+        ]
+    )
+
+    st.subheader("Quality Diagnostics")
+    _metric_row(
+        [
+            ("Average Winner", _money(quality["average_winner"])),
+            ("Average Loser", _money(quality["average_loser"])),
+            ("Win Rate", f"{quality['win_rate']:.2%}"),
+            ("Payoff Ratio", _optional_decimal(quality["payoff_ratio"])),
+            ("Breakeven Win Rate", _optional_percent(quality["breakeven_win_rate"])),
+            ("Expectancy / Trade", _money(quality["expectancy_per_trade"])),
+        ]
+    )
+
+    render_diagnostic_warnings(diagnostics, strategy_metrics)
+
+    st.subheader("Exit Reason Breakdown")
+    st.dataframe(diagnostics["exit_reason_table"], use_container_width=True)
+
+    hourly_table = diagnostics["hourly_table"]
+    if not hourly_table.empty:
+        st.subheader("Time-of-Day Diagnostics")
+        st.dataframe(hourly_table, use_container_width=True)
+        st.bar_chart(hourly_table.set_index("Hour")["Trades"])
+        st.bar_chart(hourly_table.set_index("Hour")["NetPnL"])
+
+    daily_table = diagnostics["daily_table"]
+    if not daily_table.empty:
+        st.subheader("Daily Diagnostics")
+        st.dataframe(daily_table, use_container_width=True)
+        st.bar_chart(daily_table.set_index("Date")["Trades"])
+        st.bar_chart(daily_table.set_index("Date")["NetPnL"])
+        best_day = diagnostics["best_day"]
+        worst_day = diagnostics["worst_day"]
+        if best_day is not None and worst_day is not None:
+            st.caption(
+                f"Best day: {best_day['Date']} ({_money(best_day['NetPnL'])}) | "
+                f"Worst day: {worst_day['Date']} ({_money(worst_day['NetPnL'])})"
+            )
+
+
+def render_diagnostic_warnings(
+    diagnostics: dict[str, Any],
+    strategy_metrics: dict[str, Any],
+) -> None:
+    overtrading = diagnostics["overtrading"]
+    costs = diagnostics["costs"]
+
+    if overtrading["average_trades_per_day"] > 20:
+        st.warning("High trading frequency detected. Costs may dominate results.")
+    if costs["total_cost"] > abs(costs["net_pnl"]) and costs["net_pnl"] < 0:
+        st.warning(
+            "Total trading costs are larger than the final net loss. Cost control is critical."
+        )
+    if _numeric_value(strategy_metrics.get("profit_factor"), default=0.0) < 1:
+        st.warning("Profit factor below 1.0 indicates the strategy lost money after costs.")
+    if strategy_metrics.get("total_trades", 0) < 30:
+        st.warning("Small sample size. Strategy metrics may not be reliable.")
+    cost_ratio = costs["cost_as_percent_of_gross_profit"]
+    if cost_ratio is not None and cost_ratio > 0.5:
+        st.warning("Costs consumed more than 50% of gross profit.")
 
 
 def export_app_outputs(
@@ -422,6 +589,216 @@ def export_app_outputs(
     with files["summary_metrics"].open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2, default=str)
     return files
+
+
+def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
+    if trades_df.empty:
+        return {
+            "overtrading": {},
+            "costs": {},
+            "quality": {},
+            "exit_reason_table": pd.DataFrame(),
+            "hourly_table": pd.DataFrame(),
+            "daily_table": pd.DataFrame(),
+            "best_day": None,
+            "worst_day": None,
+        }
+
+    trades = trades_df.copy()
+    net_pnl = _numeric_column(trades, "NetPnL")
+    total_cost = _total_cost_series(trades)
+    gross_pnl = _gross_pnl_series(trades, net_pnl, total_cost)
+    exit_time = _datetime_column(trades, "ExitTime")
+    entry_time = _datetime_column(trades, "EntryTime")
+    holding_minutes = ((exit_time - entry_time).dt.total_seconds() / 60).dropna()
+    trading_dates = exit_time.dt.date.dropna()
+    trading_hour_buckets = exit_time.dt.floor("h").dropna()
+    winning_trades = net_pnl[net_pnl > 0]
+    losing_trades = net_pnl[net_pnl < 0]
+    average_winner = float(winning_trades.mean()) if not winning_trades.empty else 0.0
+    average_loser = float(losing_trades.mean()) if not losing_trades.empty else 0.0
+    payoff_ratio = (
+        average_winner / abs(average_loser)
+        if average_winner > 0 and average_loser < 0
+        else None
+    )
+    gross_profit = float(gross_pnl[gross_pnl > 0].sum())
+    cost_as_percent_of_gross_profit = (
+        float(total_cost.sum()) / gross_profit if gross_profit > 0 else None
+    )
+
+    daily_table = _daily_diagnostics_table(trades, exit_time, net_pnl, total_cost)
+    best_day = None
+    worst_day = None
+    if not daily_table.empty:
+        best_day = daily_table.loc[daily_table["NetPnL"].idxmax()].to_dict()
+        worst_day = daily_table.loc[daily_table["NetPnL"].idxmin()].to_dict()
+
+    return {
+        "overtrading": {
+            "total_trades": int(len(trades)),
+            "unique_trading_days": int(trading_dates.nunique()),
+            "average_trades_per_day": _safe_divide_number(
+                len(trades),
+                trading_dates.nunique(),
+            ),
+            "max_trades_in_one_day": _max_trades_in_one_day(trading_dates),
+            "average_trades_per_hour": _safe_divide_optional(
+                len(trades),
+                trading_hour_buckets.nunique(),
+            ),
+            "median_holding_minutes": (
+                float(holding_minutes.median()) if not holding_minutes.empty else None
+            ),
+        },
+        "costs": {
+            "gross_pnl": float(gross_pnl.sum()),
+            "net_pnl": float(net_pnl.sum()),
+            "total_cost": float(total_cost.sum()),
+            "cost_as_percent_of_gross_profit": cost_as_percent_of_gross_profit,
+            "average_cost_per_trade": _safe_divide_number(total_cost.sum(), len(trades)),
+            "total_commission": float(_numeric_column(trades, "Commission").sum()),
+            "total_slippage_cost": float(_numeric_column(trades, "SlippageCost").sum()),
+            "total_spread_cost": float(_numeric_column(trades, "SpreadCost").sum()),
+        },
+        "quality": {
+            "average_winner": average_winner,
+            "average_loser": average_loser,
+            "win_rate": _safe_divide_number(len(winning_trades), len(trades)),
+            "payoff_ratio": payoff_ratio,
+            "breakeven_win_rate": (
+                1 / (1 + payoff_ratio) if payoff_ratio and payoff_ratio > 0 else None
+            ),
+            "expectancy_per_trade": float(net_pnl.mean()) if len(trades) else 0.0,
+        },
+        "exit_reason_table": _exit_reason_diagnostics_table(trades, net_pnl),
+        "hourly_table": _hourly_diagnostics_table(trades, exit_time, net_pnl, total_cost),
+        "daily_table": daily_table,
+        "best_day": best_day,
+        "worst_day": worst_day,
+    }
+
+
+def _exit_reason_diagnostics_table(
+    trades: pd.DataFrame,
+    net_pnl: pd.Series,
+) -> pd.DataFrame:
+    if "ExitReason" not in trades.columns:
+        return pd.DataFrame(columns=["ExitReason", "Trades", "NetPnL", "AverageNetPnL"])
+
+    table = (
+        pd.DataFrame({"ExitReason": trades["ExitReason"], "NetPnL": net_pnl})
+        .groupby("ExitReason", dropna=False)
+        .agg(Trades=("NetPnL", "size"), NetPnL=("NetPnL", "sum"), AverageNetPnL=("NetPnL", "mean"))
+        .reset_index()
+        .sort_values("Trades", ascending=False)
+    )
+    return table
+
+
+def _hourly_diagnostics_table(
+    trades: pd.DataFrame,
+    exit_time: pd.Series,
+    net_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> pd.DataFrame:
+    if exit_time.isna().all():
+        return pd.DataFrame(columns=["Hour", "Trades", "NetPnL", "TotalCost"])
+
+    table = pd.DataFrame(
+        {
+            "Hour": exit_time.dt.hour,
+            "NetPnL": net_pnl,
+            "TotalCost": total_cost,
+        }
+    ).dropna(subset=["Hour"])
+    if table.empty:
+        return pd.DataFrame(columns=["Hour", "Trades", "NetPnL", "TotalCost"])
+
+    table["Hour"] = table["Hour"].astype(int)
+    return (
+        table.groupby("Hour")
+        .agg(Trades=("NetPnL", "size"), NetPnL=("NetPnL", "sum"), TotalCost=("TotalCost", "sum"))
+        .reset_index()
+        .sort_values("Hour")
+    )
+
+
+def _daily_diagnostics_table(
+    trades: pd.DataFrame,
+    exit_time: pd.Series,
+    net_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> pd.DataFrame:
+    if exit_time.isna().all():
+        return pd.DataFrame(columns=["Date", "Trades", "NetPnL", "TotalCost"])
+
+    table = pd.DataFrame(
+        {
+            "Date": exit_time.dt.date.astype("string"),
+            "NetPnL": net_pnl,
+            "TotalCost": total_cost,
+        }
+    ).dropna(subset=["Date"])
+    if table.empty:
+        return pd.DataFrame(columns=["Date", "Trades", "NetPnL", "TotalCost"])
+
+    return (
+        table.groupby("Date")
+        .agg(Trades=("NetPnL", "size"), NetPnL=("NetPnL", "sum"), TotalCost=("TotalCost", "sum"))
+        .reset_index()
+        .sort_values("Date")
+    )
+
+
+def _numeric_column(trades: pd.DataFrame, column: str) -> pd.Series:
+    if column not in trades.columns:
+        return pd.Series([0.0] * len(trades), index=trades.index, dtype=float)
+    return pd.to_numeric(trades[column], errors="coerce").fillna(0.0)
+
+
+def _datetime_column(trades: pd.DataFrame, column: str) -> pd.Series:
+    if column not in trades.columns:
+        return pd.Series(pd.NaT, index=trades.index, dtype="datetime64[ns]")
+    return pd.to_datetime(trades[column], errors="coerce")
+
+
+def _total_cost_series(trades: pd.DataFrame) -> pd.Series:
+    if "TotalCost" in trades.columns:
+        return _numeric_column(trades, "TotalCost")
+    return (
+        _numeric_column(trades, "Commission")
+        + _numeric_column(trades, "SlippageCost")
+        + _numeric_column(trades, "SpreadCost")
+    )
+
+
+def _gross_pnl_series(
+    trades: pd.DataFrame,
+    net_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> pd.Series:
+    if "GrossPnL" in trades.columns:
+        return _numeric_column(trades, "GrossPnL")
+    return net_pnl + total_cost
+
+
+def _max_trades_in_one_day(trading_dates: pd.Series) -> int:
+    if trading_dates.empty:
+        return 0
+    return int(trading_dates.value_counts().max())
+
+
+def _safe_divide_number(numerator: float, denominator: float) -> float:
+    if denominator == 0:
+        return 0.0
+    return float(numerator / denominator)
+
+
+def _safe_divide_optional(numerator: float, denominator: float) -> float | None:
+    if denominator == 0:
+        return None
+    return float(numerator / denominator)
 
 
 def format_account_size(size: Any) -> str:
@@ -579,6 +956,25 @@ def _blank_to_none(value: str) -> str | None:
 
 def _money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def _optional_decimal(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.2f}"
+
+
+def _optional_percent(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.2%}"
+
+
+def _numeric_value(value: Any, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def format_profit_factor(value: Any) -> str:
