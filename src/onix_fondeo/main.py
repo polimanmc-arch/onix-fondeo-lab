@@ -22,6 +22,12 @@ from onix_fondeo.report import (
     export_optimization_results,
     export_results,
 )
+from onix_fondeo.risk_of_ruin import (
+    estimate_required_bankroll,
+    export_risk_of_ruin_results,
+    extract_account_net_outcomes,
+    run_monte_carlo_ruin_simulation,
+)
 from onix_fondeo.simulator import simulate_funding
 from onix_fondeo.strategy_metrics import (
     calculate_strategy_metrics,
@@ -56,6 +62,12 @@ def main():
 
     results = simulate_funding(trades, config)
     metrics = calculate_business_metrics(results, config)
+    bankroll_result = _calculate_bankroll_result(args.bankroll, results, config)
+    risk_result, required_bankroll_result, risk_files = _run_risk_of_ruin_if_requested(
+        args,
+        results,
+        config,
+    )
     presets = []
     for preset in list_presets():
         is_runnable, missing_fields = validate_preset_is_runnable(preset)
@@ -69,12 +81,11 @@ def main():
         metrics=metrics,
         presets=presets,
         strategy_metrics=strategy_metrics,
-        bankroll_result=_calculate_bankroll_result(
-            args.bankroll,
-            results,
-            config,
-        ),
+        bankroll_result=bankroll_result,
+        risk_of_ruin_result=risk_result,
+        required_bankroll_result=required_bankroll_result,
     )
+    exported_files.update(risk_files)
 
     print("\nSimulation summary:")
     print(f"Total accounts: {len(results['accounts'])}")
@@ -198,6 +209,30 @@ def parse_args() -> argparse.Namespace:
         "--bankroll",
         type=float,
         help="Initial business bankroll for path-based bankroll tracking.",
+    )
+    parser.add_argument(
+        "--monte-carlo-runs",
+        type=int,
+        default=0,
+        help="Monte Carlo risk-of-ruin runs. Requires --bankroll.",
+    )
+    parser.add_argument(
+        "--monte-carlo-max-accounts",
+        type=int,
+        default=100,
+        help="Maximum sampled accounts per Monte Carlo path.",
+    )
+    parser.add_argument(
+        "--monte-carlo-seed",
+        type=int,
+        default=42,
+        help="Monte Carlo random seed.",
+    )
+    parser.add_argument(
+        "--target-ruin-probability",
+        type=float,
+        default=0.05,
+        help="Target ruin probability for required bankroll estimate.",
     )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
@@ -709,6 +744,48 @@ def _bankroll_comparison_fields(bankroll_result: dict) -> dict:
             "accounts_affordable_remaining"
         ],
     }
+
+
+def _run_risk_of_ruin_if_requested(
+    args: argparse.Namespace,
+    results: dict,
+    config: dict,
+) -> tuple[dict | None, dict | None, dict]:
+    if args.monte_carlo_runs <= 0 or args.bankroll is None:
+        return None, None, {}
+
+    account_outcomes = extract_account_net_outcomes(results)
+    account_cost = _account_cost_from_config(config)
+    risk_result = run_monte_carlo_ruin_simulation(
+        account_outcomes=account_outcomes,
+        initial_bankroll=args.bankroll,
+        account_cost=account_cost,
+        runs=args.monte_carlo_runs,
+        max_accounts=args.monte_carlo_max_accounts,
+        seed=args.monte_carlo_seed,
+    )
+    required_bankroll_result = estimate_required_bankroll(
+        account_outcomes=account_outcomes,
+        target_ruin_probability=args.target_ruin_probability,
+        account_cost=account_cost,
+        runs=max(1, min(args.monte_carlo_runs, 5000)),
+        max_accounts=args.monte_carlo_max_accounts,
+        seed=args.monte_carlo_seed,
+    )
+    exported_files = export_risk_of_ruin_results(
+        risk_result,
+        required_bankroll_result=required_bankroll_result,
+    )
+
+    print("\nRisk of ruin:")
+    print(f"Monte Carlo runs: {risk_result['metrics']['runs']}")
+    print(f"Ruin probability: {risk_result['metrics']['ruin_probability']:.2%}")
+    print(
+        "Recommended bankroll: "
+        f"{required_bankroll_result.get('recommended_bankroll')}"
+    )
+
+    return risk_result, required_bankroll_result, exported_files
 
 
 def load_config(preset_id: str | None) -> dict | None:

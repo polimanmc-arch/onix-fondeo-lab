@@ -332,6 +332,36 @@ log. The adjustment is based on trade-level `NetPnL`, not tick-by-tick
 intratrade path data yet. A future version may integrate account-aware exits
 directly into the OHLC backtester.
 
+## Risk Of Ruin
+
+Run Monte Carlo risk-of-ruin analysis from account-level historical outcomes:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --preset tradeify_growth_50k --bankroll 3000 --monte-carlo-runs 10000 --monte-carlo-max-accounts 100
+```
+
+Run OHLC strategy risk of ruin with realistic MNQ costs:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main \
+  --market-data data/market_data/MNQ_1m.csv \
+  --strategy stochastic \
+  --preset tradeify_growth_50k \
+  --symbol MNQ \
+  --point-value 2 \
+  --contracts 1 \
+  --commission-per-side 1.24 \
+  --slippage-points 0.25 \
+  --spread-points 0.25 \
+  --bankroll 3000 \
+  --monte-carlo-runs 10000 \
+  --monte-carlo-max-accounts 100
+```
+
+This Monte Carlo engine samples observed account-level outcomes with
+replacement. It is useful for estimating capital needs and ruin risk, but it is
+not a guarantee of future performance.
+
 Compare presets with bankroll tracking:
 
 ```bash

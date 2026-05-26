@@ -121,6 +121,49 @@ def test_generate_html_report_includes_bankroll_summary_when_provided(tmp_path):
     assert "Accounts Affordable Remaining" in html
 
 
+def test_generate_html_report_includes_risk_of_ruin_when_provided(tmp_path):
+    report_path = generate_html_report(
+        _results(),
+        _metrics(),
+        output_dir=tmp_path,
+        risk_of_ruin_result={
+            "metrics": {
+                "runs": 100,
+                "max_accounts": 10,
+                "initial_bankroll": 3000,
+                "ruin_probability": 0.1,
+                "survival_probability": 0.9,
+                "median_final_bankroll": 3500,
+                "mean_final_bankroll": 3600,
+                "p5_final_bankroll": 1000,
+                "p95_final_bankroll": 7000,
+                "average_lowest_bankroll": 2500,
+                "worst_lowest_bankroll": -100,
+                "average_max_drawdown": 500,
+                "worst_max_drawdown": 1200,
+                "average_accounts_completed": 8,
+            },
+            "paths": [],
+        },
+        required_bankroll_result={
+            "target_ruin_probability": 0.05,
+            "recommended_bankroll": 5000,
+            "grid_results": [
+                {
+                    "bankroll": 3000,
+                    "ruin_probability": 0.1,
+                    "survival_probability": 0.9,
+                }
+            ],
+        },
+    )
+
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "Risk of Ruin Summary" in html
+    assert "Required Bankroll Grid" in html
+
+
 def test_export_optimization_results_adds_ranking_sections(tmp_path):
     files = export_optimization_results(_optimization_rows(), output_dir=tmp_path)
 

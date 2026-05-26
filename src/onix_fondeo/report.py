@@ -181,6 +181,8 @@ def export_results(
     presets: list[dict[str, Any]] | None = None,
     strategy_metrics: dict[str, Any] | None = None,
     bankroll_result: dict[str, Any] | None = None,
+    risk_of_ruin_result: dict[str, Any] | None = None,
+    required_bankroll_result: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -223,6 +225,8 @@ def export_results(
             presets=presets,
             strategy_metrics=strategy_metrics,
             bankroll_result=bankroll_result,
+            risk_of_ruin_result=risk_of_ruin_result,
+            required_bankroll_result=required_bankroll_result,
         )
 
     return file_paths
@@ -1075,6 +1079,8 @@ def generate_html_report(
     presets: list[dict[str, Any]] | None = None,
     strategy_metrics: dict[str, Any] | None = None,
     bankroll_result: dict[str, Any] | None = None,
+    risk_of_ruin_result: dict[str, Any] | None = None,
+    required_bankroll_result: dict[str, Any] | None = None,
 ) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -1358,6 +1364,7 @@ def generate_html_report(
 
     {_strategy_summary_section_html(strategy_metrics)}
     {_bankroll_summary_section_html(bankroll_result)}
+    {_risk_of_ruin_section_html(risk_of_ruin_result, required_bankroll_result)}
 
     <section>
       <h2>Business Metrics</h2>
@@ -1665,6 +1672,66 @@ def _bankroll_card_html(label: str, value: str, css_class: str = "") -> str:
         f'<div class="card-label">{escape(label)}</div>'
         f'<div class="card-value {escape(css_class)}">{escape(value)}</div>'
         "</div>"
+    )
+
+
+def _risk_of_ruin_section_html(
+    risk_of_ruin_result: dict[str, Any] | None,
+    required_bankroll_result: dict[str, Any] | None,
+) -> str:
+    if risk_of_ruin_result is None:
+        return ""
+
+    metrics = risk_of_ruin_result["metrics"]
+    recommended_bankroll = (
+        required_bankroll_result or {}
+    ).get("recommended_bankroll")
+    recommended_text = (
+        "N/A" if recommended_bankroll is None else _format_dollar(recommended_bankroll)
+    )
+    return f"""
+    <section>
+      <h2>Risk of Ruin Summary</h2>
+      <div class="cards">
+        {_bankroll_card_html("Monte Carlo Runs", f"{metrics['runs']:,}")}
+        {_bankroll_card_html("Ruin Probability", format_percent(metrics["ruin_probability"]), "negative" if metrics["ruin_probability"] > 0 else "positive")}
+        {_bankroll_card_html("Survival Probability", format_percent(metrics["survival_probability"]), "positive")}
+        {_bankroll_card_html("Median Final Bankroll", _format_dollar(metrics["median_final_bankroll"]), _number_class(metrics["median_final_bankroll"] - metrics["initial_bankroll"]))}
+        {_bankroll_card_html("Mean Final Bankroll", _format_dollar(metrics["mean_final_bankroll"]), _number_class(metrics["mean_final_bankroll"] - metrics["initial_bankroll"]))}
+        {_bankroll_card_html("5th Percentile Final Bankroll", _format_dollar(metrics["p5_final_bankroll"]))}
+        {_bankroll_card_html("95th Percentile Final Bankroll", _format_dollar(metrics["p95_final_bankroll"]))}
+        {_bankroll_card_html("Worst Lowest Bankroll", _format_dollar(metrics["worst_lowest_bankroll"]), "negative" if metrics["worst_lowest_bankroll"] < 0 else "")}
+        {_bankroll_card_html("Worst Max Drawdown", _format_dollar(metrics["worst_max_drawdown"]), "negative" if metrics["worst_max_drawdown"] > 0 else "")}
+        {_bankroll_card_html("Average Accounts Completed", f"{metrics['average_accounts_completed']:.2f}")}
+        {_bankroll_card_html("Recommended Bankroll", recommended_text)}
+      </div>
+      {_required_bankroll_table_html(required_bankroll_result)}
+    </section>
+"""
+
+
+def _required_bankroll_table_html(required_bankroll_result: dict[str, Any] | None) -> str:
+    if required_bankroll_result is None:
+        return ""
+    rows = required_bankroll_result.get("grid_results", [])
+    if not rows:
+        return '<p class="empty">No required bankroll grid available.</p>'
+
+    table_rows = []
+    for row in rows:
+        table_rows.append(
+            "<tr>"
+            f"<td>{escape(_format_dollar(row['bankroll']))}</td>"
+            f"<td>{escape(format_percent(row['ruin_probability']))}</td>"
+            f"<td>{escape(format_percent(row['survival_probability']))}</td>"
+            "</tr>"
+        )
+    return (
+        "<h2>Required Bankroll Grid</h2>"
+        "<table><thead><tr>"
+        "<th>Bankroll</th><th>Ruin Probability</th><th>Survival Probability</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
     )
 
 
