@@ -226,6 +226,18 @@ Run parallel optimization across presets:
 PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --compare tradeify_growth_50k lucid_trading_lucidflex_50k --optimization-grid fast --optimization-workers 4 --symbol MNQ --point-value 2
 ```
 
+Run optimization report rankings with a minimum trades filter:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --preset tradeify_growth_50k --optimization-grid fast --optimization-workers 4 --optimization-min-trades 30 --symbol MNQ --point-value 2
+```
+
+Compare presets with a minimum trades filter:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --compare tradeify_growth_50k lucid_trading_lucidflex_50k --optimization-grid fast --optimization-workers 4 --optimization-min-trades 30 --symbol MNQ --point-value 2
+```
+
 Compare stochastic optimization across presets:
 
 ```bash

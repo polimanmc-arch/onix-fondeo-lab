@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from datetime import datetime
 from html import escape
 from pathlib import Path
@@ -247,6 +248,7 @@ def export_comparison_results(
 def export_optimization_results(
     rows: list[dict[str, Any]],
     output_dir: str | Path = "data/output",
+    min_trades: int = 0,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -260,24 +262,42 @@ def export_optimization_results(
         file_paths["optimization_results"],
         index=False,
     )
-    _generate_optimization_html_report(rows, file_paths["optimization_report"])
+    _generate_optimization_html_report(
+        rows,
+        file_paths["optimization_report"],
+        min_trades=min_trades,
+    )
     return file_paths
 
 
 def _generate_optimization_html_report(
     rows: list[dict[str, Any]],
     file_path: Path,
+    min_trades: int = 0,
 ) -> None:
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    sorted_rows = sorted(
-        rows,
-        key=lambda row: row.get("net_business_pnl", 0) or 0,
-        reverse=True,
+    ranked_rows = _filter_optimization_rows_by_min_trades(rows, min_trades)
+    detailed_rows = _sort_optimization_rows(rows, "net_business_pnl")[:25]
+    top_business_rows = _sort_optimization_rows(ranked_rows, "net_business_pnl")[:10]
+    top_roi_rows = _sort_optimization_rows(ranked_rows, "roi")[:10]
+    top_strategy_rows = _sort_optimization_rows(ranked_rows, "net_pnl")[:10]
+    top_profit_factor_rows = _sort_optimization_rows(
+        ranked_rows,
+        "profit_factor",
+        finite_only=True,
+    )[:10]
+    preset_rankings = _optimization_preset_rankings(ranked_rows)
+
+    best_business = _best_row(ranked_rows, "net_business_pnl")
+    best_roi = _best_row(ranked_rows, "roi")
+    best_strategy = _best_row(ranked_rows, "net_pnl")
+    best_profit_factor = _best_row(
+        ranked_rows,
+        "profit_factor",
+        finite_only=True,
     )
-    top_rows = sorted_rows[:25]
-    best_business = _best_row(rows, "net_business_pnl")
-    best_roi = _best_row(rows, "roi")
-    best_strategy = _best_row(rows, "net_pnl")
+    unique_runs = len({row.get("run_id") for row in rows})
+    unique_presets = len({row.get("preset_id") for row in rows})
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -301,6 +321,7 @@ def _generate_optimization_html_report(
     h1 {{ margin: 0 0 4px; font-size: 30px; }}
     h2 {{ margin: 30px 0 12px; font-size: 20px; }}
     .timestamp {{ margin: 0 0 24px; color: #64748b; font-size: 14px; }}
+    .note {{ color: #475569; margin: 0 0 18px; }}
     .cards {{
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -318,6 +339,7 @@ def _generate_optimization_html_report(
       text-transform: uppercase;
     }}
     .card-value {{ margin-top: 6px; font-size: 18px; font-weight: 700; }}
+    .card-detail {{ margin-top: 6px; color: #64748b; font-size: 13px; }}
     .positive {{ color: #047857; font-weight: 700; }}
     .negative {{ color: #b91c1c; font-weight: 700; }}
     table {{
@@ -360,22 +382,51 @@ def _generate_optimization_html_report(
   <main>
     <h1>Onix Fondeo Lab - Strategy Optimization Report</h1>
     <p class="timestamp">Generated: {escape(generated_at)}</p>
+    <p class="note">Ranking sections apply the minimum trades filter. CSV export includes all rows.</p>
+
+    <h2>Report Summary</h2>
     <div class="cards">
       {_optimization_summary_card("Total Optimization Rows", len(rows), "number")}
-      {_optimization_best_card("Best by Net Business PnL", best_business, "net_business_pnl", "money")}
-      {_optimization_best_card("Best by ROI", best_roi, "roi", "percent")}
-      {_optimization_best_card("Best by Strategy Net PnL", best_strategy, "net_pnl", "money")}
+      {_optimization_summary_card("Unique Strategy Runs", unique_runs, "number")}
+      {_optimization_summary_card("Unique Presets", unique_presets, "number")}
+      {_optimization_summary_card("Min Trades Filter", min_trades, "number")}
+      {_optimization_best_card("Best Funding Net PnL", best_business, "net_business_pnl", "money")}
+      {_optimization_best_card("Best ROI", best_roi, "roi", "percent")}
+      {_optimization_best_card("Best Strategy Net PnL", best_strategy, "net_pnl", "money")}
+      {_optimization_best_card("Best Profit Factor", best_profit_factor, "profit_factor", "ratio")}
     </div>
 
-    <h2>Net Business PnL</h2>
-    {_optimization_bar_html(top_rows, "net_business_pnl", "money")}
-
-    <h2>ROI</h2>
-    {_optimization_bar_html(top_rows, "roi", "percent")}
-
-    <h2>Top 25 Rows by Net Business PnL</h2>
+    <h2>Top 10 by Funding Net PnL</h2>
+    {_optimization_bar_html(top_business_rows, "net_business_pnl", "money")}
     <div class="table-wrap">
-      {_optimization_table_html(top_rows)}
+      {_optimization_table_html(top_business_rows)}
+    </div>
+
+    <h2>Top 10 by ROI</h2>
+    {_optimization_bar_html(top_roi_rows, "roi", "percent")}
+    <div class="table-wrap">
+      {_optimization_table_html(top_roi_rows)}
+    </div>
+
+    <h2>Top 10 by Strategy Net PnL</h2>
+    {_optimization_bar_html(top_strategy_rows, "net_pnl", "money")}
+    <div class="table-wrap">
+      {_optimization_table_html(top_strategy_rows)}
+    </div>
+
+    <h2>Top 10 by Profit Factor</h2>
+    <div class="table-wrap">
+      {_optimization_table_html(top_profit_factor_rows)}
+    </div>
+
+    <h2>Ranking by Preset</h2>
+    <div class="table-wrap">
+      {_optimization_preset_ranking_table_html(preset_rankings)}
+    </div>
+
+    <h2>Top 25 Detailed Results</h2>
+    <div class="table-wrap">
+      {_optimization_table_html(detailed_rows)}
     </div>
   </main>
 </body>
@@ -387,10 +438,63 @@ def _generate_optimization_html_report(
 def _best_row(
     rows: list[dict[str, Any]],
     field_name: str,
+    finite_only: bool = False,
 ) -> dict[str, Any] | None:
-    if not rows:
+    sortable_rows = [
+        row
+        for row in rows
+        if _safe_number(row.get(field_name), finite_only=finite_only) is not None
+    ]
+    if not sortable_rows:
         return None
-    return max(rows, key=lambda row: row.get(field_name, 0) or 0)
+    return max(
+        sortable_rows,
+        key=lambda row: _safe_number(row.get(field_name), finite_only=finite_only)
+        or 0,
+    )
+
+
+def _filter_optimization_rows_by_min_trades(
+    rows: list[dict[str, Any]],
+    min_trades: int,
+) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if (_safe_number(row.get("total_trades")) or 0) >= min_trades
+    ]
+
+
+def _sort_optimization_rows(
+    rows: list[dict[str, Any]],
+    field_name: str,
+    finite_only: bool = False,
+) -> list[dict[str, Any]]:
+    sortable_rows = [
+        row
+        for row in rows
+        if _safe_number(row.get(field_name), finite_only=finite_only) is not None
+    ]
+    return sorted(
+        sortable_rows,
+        key=lambda row: _safe_number(row.get(field_name), finite_only=finite_only)
+        or 0,
+        reverse=True,
+    )
+
+
+def _safe_number(value: Any, finite_only: bool = False) -> float | None:
+    if value is None:
+        return None
+    try:
+        if pd.isna(value):
+            return None
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if finite_only and not math.isfinite(number):
+        return None
+    return number
 
 
 def _optimization_summary_card(label: str, value: Any, value_type: str) -> str:
@@ -398,7 +502,7 @@ def _optimization_summary_card(label: str, value: Any, value_type: str) -> str:
         '<div class="card">'
         f'<div class="card-label">{escape(label)}</div>'
         f'<div class="card-value {_number_class(value)}">'
-        f'{_format_metric_value(value, value_type)}'
+        f'{_format_optimization_metric(value, value_type)}'
         "</div></div>"
     )
 
@@ -420,9 +524,9 @@ def _optimization_best_card(
         '<div class="card">'
         f'<div class="card-label">{escape(label)}</div>'
         f'<div class="card-value {_number_class(value)}">'
-        f'{_format_metric_value(value, value_type)}'
+        f'{_format_optimization_metric(value, value_type)}'
         "</div>"
-        f'<div class="timestamp">{escape(detail)}</div>'
+        f'<div class="card-detail">{escape(detail)}</div>'
         "</div>"
     )
 
@@ -435,10 +539,13 @@ def _optimization_bar_html(
     if not rows:
         return '<p class="empty">No optimization rows to chart.</p>'
 
-    max_abs = max(abs(float(row.get(field_name, 0) or 0)) for row in rows)
+    valid_values = [
+        _safe_number(row.get(field_name), finite_only=True) or 0 for row in rows
+    ]
+    max_abs = max(abs(value) for value in valid_values)
     bars = []
     for row in rows:
-        value = float(row.get(field_name, 0) or 0)
+        value = _safe_number(row.get(field_name), finite_only=True) or 0
         width = 0.0 if max_abs == 0 else abs(value) / max_abs * 100
         label = (
             f"run {row.get('run_id')} | {row.get('preset_id')} | "
@@ -453,7 +560,7 @@ def _optimization_bar_html(
                 f'<div class="bar-fill" style="width: {width:.2f}%;"></div>'
                 "</div>"
                 f'<div class="{_number_class(value)}">'
-                f"{_format_metric_value(value, value_type)}</div>"
+                f"{_format_optimization_metric(value, value_type)}</div>"
                 "</div>"
             )
         )
@@ -493,11 +600,116 @@ def _optimization_table_html(rows: list[dict[str, Any]]) -> str:
     )
 
 
+def _optimization_preset_rankings(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        grouped.setdefault(str(row.get("preset_id", "")), []).append(row)
+
+    ranking_rows = []
+    for preset_id, preset_rows in grouped.items():
+        net_values = _valid_numbers(preset_rows, "net_business_pnl")
+        roi_values = _valid_numbers(preset_rows, "roi")
+        strategy_values = _valid_numbers(preset_rows, "net_pnl")
+        trade_values = _valid_numbers(preset_rows, "total_trades")
+        first_row = preset_rows[0]
+        ranking_rows.append(
+            {
+                "preset_id": preset_id,
+                "company": first_row.get("company"),
+                "plan": first_row.get("plan"),
+                "account_name": first_row.get("account_name"),
+                "runs": len(preset_rows),
+                "best_net_business_pnl": max(net_values) if net_values else 0.0,
+                "average_net_business_pnl": _average(net_values),
+                "best_roi": max(roi_values) if roi_values else 0.0,
+                "average_roi": _average(roi_values),
+                "best_strategy_net_pnl": max(strategy_values)
+                if strategy_values
+                else 0.0,
+                "average_strategy_net_pnl": _average(strategy_values),
+                "average_total_trades": _average(trade_values),
+            }
+        )
+
+    return sorted(
+        ranking_rows,
+        key=lambda row: row["best_net_business_pnl"],
+        reverse=True,
+    )
+
+
+def _optimization_preset_ranking_table_html(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return '<p class="empty">No preset rankings to display.</p>'
+
+    columns = [
+        "preset_id",
+        "company",
+        "plan",
+        "account_name",
+        "runs",
+        "best_net_business_pnl",
+        "average_net_business_pnl",
+        "best_roi",
+        "average_roi",
+        "best_strategy_net_pnl",
+        "average_strategy_net_pnl",
+        "average_total_trades",
+    ]
+    money_columns = {
+        "best_net_business_pnl",
+        "average_net_business_pnl",
+        "best_strategy_net_pnl",
+        "average_strategy_net_pnl",
+    }
+    percent_columns = {"best_roi", "average_roi"}
+    numeric_columns = money_columns | percent_columns | {"average_total_trades"}
+
+    header = "".join(f"<th>{escape(column)}</th>" for column in columns)
+    table_rows = []
+    for row in rows:
+        cells = []
+        for column in columns:
+            value = row.get(column)
+            css_class = _number_class(value) if column in numeric_columns else ""
+            class_attr = f' class="{css_class}"' if css_class else ""
+            if column in money_columns:
+                formatted = _format_optimization_metric(value, "money")
+            elif column in percent_columns:
+                formatted = _format_optimization_metric(value, "percent")
+            elif column == "average_total_trades":
+                formatted = _format_optimization_metric(value, "decimal")
+            else:
+                formatted = str(value or "")
+            cells.append(f"<td{class_attr}>{escape(formatted)}</td>")
+        table_rows.append(f"<tr>{''.join(cells)}</tr>")
+
+    return (
+        f"<table><thead><tr>{header}</tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
+    )
+
+
+def _valid_numbers(rows: list[dict[str, Any]], field_name: str) -> list[float]:
+    values = []
+    for row in rows:
+        value = _safe_number(row.get(field_name), finite_only=True)
+        if value is not None:
+            values.append(value)
+    return values
+
+
+def _average(values: list[float]) -> float:
+    if not values:
+        return 0.0
+    return sum(values) / len(values)
+
+
 def _format_optimization_cell(column: str, value: Any) -> str:
     if value is None:
         return ""
     if column in {"win_rate", "pass_rate", "payout_rate_on_evaluations", "roi"}:
-        return format_percent(float(value))
+        return _format_optimization_metric(value, "percent")
     if column in {
         "net_pnl",
         "average_trade",
@@ -506,11 +718,32 @@ def _format_optimization_cell(column: str, value: Any) -> str:
         "net_business_pnl",
         "expected_value_per_evaluation",
     }:
-        return _format_dollar(float(value))
-    if column == "profit_factor" and value == float("inf"):
-        return "inf"
+        return _format_optimization_metric(value, "money")
+    if column == "profit_factor":
+        return _format_optimization_metric(value, "ratio")
     if isinstance(value, float):
         return f"{value:.4f}"
+    return str(value)
+
+
+def _format_optimization_metric(value: Any, value_type: str) -> str:
+    number = _safe_number(value)
+    if number is None:
+        return "N/A"
+    if value_type == "percent":
+        return format_percent(number)
+    if value_type == "money":
+        return _format_dollar(number)
+    if value_type == "ratio":
+        if math.isinf(number):
+            return "∞"
+        if math.isnan(number):
+            return "N/A"
+        return f"{number:.2f}"
+    if value_type == "decimal":
+        return f"{number:,.2f}"
+    if value_type == "number":
+        return f"{number:,.0f}"
     return str(value)
 
 

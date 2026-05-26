@@ -1,5 +1,9 @@
 from onix_fondeo.models import Account
-from onix_fondeo.report import export_comparison_results, generate_html_report
+from onix_fondeo.report import (
+    export_comparison_results,
+    export_optimization_results,
+    generate_html_report,
+)
 
 
 def test_export_comparison_results_creates_csv_and_html(tmp_path):
@@ -78,6 +82,39 @@ def test_generate_html_report_omits_strategy_summary_without_metrics(tmp_path):
     assert "Strategy Summary" not in html
 
 
+def test_export_optimization_results_adds_ranking_sections(tmp_path):
+    files = export_optimization_results(_optimization_rows(), output_dir=tmp_path)
+
+    html = files["optimization_report"].read_text(encoding="utf-8")
+
+    assert "Top 10 by Funding Net PnL" in html
+    assert "Top 10 by ROI" in html
+    assert "Top 10 by Strategy Net PnL" in html
+    assert "Top 10 by Profit Factor" in html
+    assert "Ranking by Preset" in html
+
+
+def test_export_optimization_results_min_trades_filters_rankings_only(tmp_path):
+    files = export_optimization_results(
+        _optimization_rows(),
+        output_dir=tmp_path,
+        min_trades=10,
+    )
+
+    csv_text = files["optimization_results"].read_text(encoding="utf-8")
+    html = files["optimization_report"].read_text(encoding="utf-8")
+    top_funding_section = _section_between(
+        html,
+        "<h2>Top 10 by Funding Net PnL</h2>",
+        "<h2>Top 10 by ROI</h2>",
+    )
+
+    assert "too_few_trades" in csv_text
+    assert "too_few_trades" not in top_funding_section
+    assert "enough_trades" in top_funding_section
+    assert "CSV export includes all rows" in html
+
+
 def _results():
     return {
         "accounts": [Account(account_id=1, phase="EVALUATION")],
@@ -109,3 +146,64 @@ def _metrics():
         "average_net_payout": 0.0,
         "total_payouts": 0,
     }
+
+
+def _optimization_rows():
+    base_row = {
+        "run_id": 1,
+        "company": "TestCo",
+        "plan": "Plan",
+        "account_name": "Account",
+        "account_size": 50000,
+        "strategy": "stochastic",
+        "stoch_k_period": 14,
+        "stoch_d_period": 3,
+        "oversold": 20,
+        "overbought": 80,
+        "signal_mode": "cross",
+        "use_d_confirmation": False,
+        "min_k_d_gap": 0,
+        "cooldown_bars": 0,
+        "stop_loss_points": 20,
+        "take_profit_points": 30,
+        "win_rate": 0.5,
+        "average_trade": 25,
+        "max_consecutive_wins": 2,
+        "max_consecutive_losses": 1,
+        "total_evaluations": 2,
+        "passed_evaluations": 1,
+        "pass_rate": 0.5,
+        "funded_with_payout": 1,
+        "payout_rate_on_evaluations": 0.5,
+        "total_evaluation_cost": 200,
+        "total_net_payout": 900,
+        "expected_value_per_evaluation": 350,
+        "total_payouts": 1,
+    }
+    return [
+        {
+            **base_row,
+            "preset_id": "too_few_trades",
+            "total_trades": 2,
+            "net_pnl": 5000,
+            "profit_factor": 10,
+            "net_business_pnl": 2000,
+            "roi": 10,
+        },
+        {
+            **base_row,
+            "run_id": 2,
+            "preset_id": "enough_trades",
+            "total_trades": 30,
+            "net_pnl": 1000,
+            "profit_factor": 2,
+            "net_business_pnl": 800,
+            "roi": 4,
+        },
+    ]
+
+
+def _section_between(text: str, start: str, end: str) -> str:
+    start_index = text.index(start)
+    end_index = text.index(end, start_index)
+    return text[start_index:end_index]

@@ -179,6 +179,12 @@ def parse_args() -> argparse.Namespace:
         default=1,
         help="Number of parallel optimization workers. Defaults to 1.",
     )
+    parser.add_argument(
+        "--optimization-min-trades",
+        type=int,
+        default=0,
+        help="Minimum trades required for optimization report rankings.",
+    )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
     parser.add_argument(
@@ -333,7 +339,10 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
         grid_name=args.optimization_grid,
         workers=args.optimization_workers,
     )
-    exported_files = export_optimization_results(rows)
+    exported_files = export_optimization_results(
+        rows,
+        min_trades=args.optimization_min_trades,
+    )
     top_rows = sorted(
         rows,
         key=lambda row: row.get("net_business_pnl", 0) or 0,
