@@ -53,6 +53,7 @@ def test_run_stochastic_optimization_returns_rows():
         ohlc=_sample_ohlc(),
         presets=[_preset()],
         max_runs=1,
+        workers=1,
     )
 
     assert len(rows) == 1
@@ -70,6 +71,18 @@ def test_run_stochastic_optimization_max_runs_limits_parameter_sets():
 
     assert len(rows) == 4
     assert {row["run_id"] for row in rows} == {1, 2}
+
+
+def test_run_stochastic_optimization_with_parallel_workers_returns_rows():
+    rows = run_stochastic_optimization(
+        ohlc=_sample_ohlc(),
+        presets=[_preset()],
+        max_runs=2,
+        workers=2,
+    )
+
+    assert len(rows) == 2
+    assert [row["run_id"] for row in rows] == [1, 2]
 
 
 def test_filter_ohlc_by_date_limits_rows_without_mutating_source():

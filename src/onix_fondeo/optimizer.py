@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from itertools import product
 from time import perf_counter
 from typing import Any
@@ -95,6 +96,7 @@ def run_stochastic_optimization(
     base_args: dict[str, Any] | None = None,
     max_runs: int | None = None,
     grid_name: str = "fast",
+    workers: int = 1,
 ) -> list[dict[str, Any]]:
     start_time = perf_counter()
     base_args = base_args or {}
@@ -113,52 +115,112 @@ def run_stochastic_optimization(
     rows = []
     total_runs = len(parameter_grid)
     preset_count = len(runnable_presets)
-    for run_index, params in enumerate(parameter_grid, start=1):
-        print(f"Optimization run {run_index}/{total_runs} | Presets: {preset_count}")
-        strategy = StochasticLevelStrategy(
-            k_period=params["stoch_k_period"],
-            d_period=params["stoch_d_period"],
-            oversold_level=params["oversold"],
-            overbought_level=params["overbought"],
-            signal_mode=params["signal_mode"],
-            use_d_confirmation=params["use_d_confirmation"],
-            min_k_d_gap=params["min_k_d_gap"],
-            cooldown_bars=params["cooldown_bars"],
-        )
-        trades = backtest_strategy(
-            ohlc=ohlc,
-            strategy=strategy,
-            symbol=base_args.get("symbol", "NQ"),
-            quantity=base_args.get("quantity", 1),
-            point_value=base_args.get("point_value", 20.0),
-            stop_loss_points=params["stop_loss_points"],
-            take_profit_points=params["take_profit_points"],
-            max_holding_minutes=base_args.get("max_holding_minutes", 60),
-            commission_per_side=base_args.get("commission_per_side", 0.0),
-            same_bar_exit_policy=base_args.get(
-                "same_bar_exit_policy",
-                "conservative",
-            ),
-            force_close_time=base_args.get("force_close_time"),
-        )
-        strategy_metrics = calculate_strategy_metrics(trades)
+    jobs = [
+        {
+            "run_id": run_index,
+            "params": params,
+            "ohlc": ohlc,
+            "presets": runnable_presets,
+            "base_args": base_args,
+        }
+        for run_index, params in enumerate(parameter_grid, start=1)
+    ]
 
-        for preset in runnable_presets:
-            config = config_from_preset(preset)
-            results = simulate_funding(trades, config)
-            funding_metrics = calculate_business_metrics(results, config)
-            rows.append(
-                _optimization_row(
-                    run_id=run_index,
-                    preset=preset,
-                    params=params,
-                    strategy_metrics=strategy_metrics,
-                    funding_metrics=funding_metrics,
-                )
+    if workers <= 1:
+        for job in jobs:
+            print(
+                f"Optimization run {job['run_id']}/{total_runs} | "
+                f"Presets: {preset_count}"
             )
+            rows.extend(run_single_stochastic_optimization_job(job))
+    else:
+        rows.extend(_run_parallel_optimization_jobs(jobs, workers, total_runs))
 
     elapsed_seconds = perf_counter() - start_time
     print(f"Optimization completed in {elapsed_seconds:.2f} seconds.")
+    rows.sort(key=lambda row: (row.get("run_id", 0), row.get("preset_id", "")))
+    return rows
+
+
+def run_single_stochastic_optimization_job(job: dict) -> list[dict[str, Any]]:
+    run_id = job["run_id"]
+    params = job["params"]
+    ohlc = job["ohlc"]
+    presets = job["presets"]
+    base_args = job.get("base_args") or {}
+
+    strategy = StochasticLevelStrategy(
+        k_period=params["stoch_k_period"],
+        d_period=params["stoch_d_period"],
+        oversold_level=params["oversold"],
+        overbought_level=params["overbought"],
+        signal_mode=params["signal_mode"],
+        use_d_confirmation=params["use_d_confirmation"],
+        min_k_d_gap=params["min_k_d_gap"],
+        cooldown_bars=params["cooldown_bars"],
+    )
+    trades = backtest_strategy(
+        ohlc=ohlc,
+        strategy=strategy,
+        symbol=base_args.get("symbol", "NQ"),
+        quantity=base_args.get("quantity", 1),
+        point_value=base_args.get("point_value", 20.0),
+        stop_loss_points=params["stop_loss_points"],
+        take_profit_points=params["take_profit_points"],
+        max_holding_minutes=base_args.get("max_holding_minutes", 60),
+        commission_per_side=base_args.get("commission_per_side", 0.0),
+        same_bar_exit_policy=base_args.get(
+            "same_bar_exit_policy",
+            "conservative",
+        ),
+        force_close_time=base_args.get("force_close_time"),
+    )
+    strategy_metrics = calculate_strategy_metrics(trades)
+
+    rows = []
+    for preset in presets:
+        config = config_from_preset(preset)
+        results = simulate_funding(trades, config)
+        funding_metrics = calculate_business_metrics(results, config)
+        rows.append(
+            _optimization_row(
+                run_id=run_id,
+                preset=preset,
+                params=params,
+                strategy_metrics=strategy_metrics,
+                funding_metrics=funding_metrics,
+            )
+        )
+    return rows
+
+
+def _run_parallel_optimization_jobs(
+    jobs: list[dict],
+    workers: int,
+    total_runs: int,
+) -> list[dict[str, Any]]:
+    rows = []
+    failed_jobs = 0
+    with ProcessPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(run_single_stochastic_optimization_job, job): job
+            for job in jobs
+        }
+        for completed_count, future in enumerate(as_completed(futures), start=1):
+            job = futures[future]
+            run_id = job["run_id"]
+            try:
+                rows.extend(future.result())
+                print(
+                    f"Completed optimization run {completed_count}/{total_runs} "
+                    f"| run_id {run_id}"
+                )
+            except Exception as error:
+                failed_jobs += 1
+                print(f"Optimization job failed for run_id {run_id}: {error}")
+
+    if failed_jobs == len(jobs) and jobs:
+        raise ValueError("All optimization jobs failed.")
     return rows
 
 

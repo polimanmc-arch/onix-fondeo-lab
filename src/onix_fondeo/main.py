@@ -173,6 +173,12 @@ def parse_args() -> argparse.Namespace:
         "--optimization-end-date",
         help="Optional optimization end date, YYYY-MM-DD.",
     )
+    parser.add_argument(
+        "--optimization-workers",
+        type=int,
+        default=1,
+        help="Number of parallel optimization workers. Defaults to 1.",
+    )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
     parser.add_argument(
@@ -325,6 +331,7 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
         },
         max_runs=args.max_optimization_runs,
         grid_name=args.optimization_grid,
+        workers=args.optimization_workers,
     )
     exported_files = export_optimization_results(rows)
     top_rows = sorted(
