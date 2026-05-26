@@ -8,6 +8,7 @@ from typing import Any
 import pandas as pd
 
 from onix_fondeo.backtester import backtest_strategy
+from onix_fondeo.bankroll import calculate_bankroll_curve
 from onix_fondeo.loader import (
     config_from_preset,
     validate_preset_is_runnable,
@@ -182,6 +183,11 @@ def run_single_stochastic_optimization_job(job: dict) -> list[dict[str, Any]]:
         config = config_from_preset(preset)
         results = simulate_funding(trades, config)
         funding_metrics = calculate_business_metrics(results, config)
+        bankroll_fields = _optimization_bankroll_fields(
+            results,
+            config,
+            base_args.get("initial_bankroll"),
+        )
         rows.append(
             _optimization_row(
                 run_id=run_id,
@@ -189,6 +195,7 @@ def run_single_stochastic_optimization_job(job: dict) -> list[dict[str, Any]]:
                 params=params,
                 strategy_metrics=strategy_metrics,
                 funding_metrics=funding_metrics,
+                bankroll_fields=bankroll_fields,
             )
         )
     return rows
@@ -230,8 +237,9 @@ def _optimization_row(
     params: dict[str, Any],
     strategy_metrics: dict[str, Any],
     funding_metrics: dict[str, Any],
+    bankroll_fields: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    row = {
         "run_id": run_id,
         "preset_id": preset["preset_id"],
         "company": preset["company"],
@@ -272,3 +280,33 @@ def _optimization_row(
         ],
         "total_payouts": funding_metrics["total_payouts"],
     }
+    if bankroll_fields:
+        row.update(bankroll_fields)
+    return row
+
+
+def _optimization_bankroll_fields(
+    results: dict[str, Any],
+    config: dict[str, Any],
+    initial_bankroll: float | None,
+) -> dict[str, Any] | None:
+    if initial_bankroll is None:
+        return None
+    bankroll_result = calculate_bankroll_curve(
+        results["business_events"],
+        initial_bankroll=initial_bankroll,
+        account_cost=_account_cost_from_config(config),
+    )
+    bankroll_metrics = bankroll_result["metrics"]
+    return {
+        "final_bankroll": bankroll_metrics["final_bankroll"],
+        "bankroll_ruined": bankroll_metrics["bankroll_ruined"],
+    }
+
+
+def _account_cost_from_config(config: dict[str, Any]) -> float | None:
+    evaluation = config.get("evaluation", {})
+    funded = config.get("funded", {})
+    if evaluation.get("enabled", True):
+        return evaluation.get("evaluation_cost")
+    return funded.get("account_cost") or evaluation.get("evaluation_cost")
