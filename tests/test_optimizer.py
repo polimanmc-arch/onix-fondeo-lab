@@ -3,6 +3,7 @@ import pandas as pd
 import onix_fondeo.optimizer as optimizer
 from onix_fondeo.optimizer import (
     build_stochastic_parameter_grid,
+    filter_ohlc_by_date,
     run_stochastic_optimization,
 )
 from onix_fondeo.report import export_optimization_results
@@ -12,6 +13,22 @@ def test_build_stochastic_parameter_grid_returns_non_empty_list():
     grid = build_stochastic_parameter_grid()
 
     assert grid
+
+
+def test_fast_stochastic_parameter_grid_is_smaller_than_full_grid():
+    fast_grid = build_stochastic_parameter_grid("fast")
+    full_grid = build_stochastic_parameter_grid("full")
+
+    assert len(fast_grid) < len(full_grid)
+
+
+def test_invalid_stochastic_parameter_grid_name_raises_value_error():
+    try:
+        build_stochastic_parameter_grid("huge")
+    except ValueError as error:
+        assert "Unknown optimization grid" in str(error)
+    else:
+        raise AssertionError("Expected ValueError for invalid grid name")
 
 
 def test_stochastic_parameter_grid_contains_required_keys():
@@ -53,6 +70,32 @@ def test_run_stochastic_optimization_max_runs_limits_parameter_sets():
 
     assert len(rows) == 4
     assert {row["run_id"] for row in rows} == {1, 2}
+
+
+def test_filter_ohlc_by_date_limits_rows_without_mutating_source():
+    ohlc = pd.DataFrame(
+        {
+            "DateTime": pd.to_datetime(
+                [
+                    "2026-03-11 09:30:00",
+                    "2026-03-12 09:30:00",
+                    "2026-03-19 09:30:00",
+                    "2026-03-20 09:30:00",
+                ]
+            ),
+            "Open": [1, 2, 3, 4],
+        }
+    )
+
+    filtered = filter_ohlc_by_date(
+        ohlc,
+        start_date="2026-03-12",
+        end_date="2026-03-19",
+    )
+
+    assert len(filtered) == 2
+    assert len(ohlc) == 4
+    assert filtered.iloc[0]["DateTime"] == pd.Timestamp("2026-03-12 09:30:00")
 
 
 def test_export_optimization_results_creates_csv_and_html(tmp_path):

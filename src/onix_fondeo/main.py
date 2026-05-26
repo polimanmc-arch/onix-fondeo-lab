@@ -12,7 +12,7 @@ from onix_fondeo.loader import (
 )
 from onix_fondeo.market_data import load_ohlc_data
 from onix_fondeo.metrics import calculate_business_metrics
-from onix_fondeo.optimizer import run_stochastic_optimization
+from onix_fondeo.optimizer import filter_ohlc_by_date, run_stochastic_optimization
 from onix_fondeo.report import (
     export_comparison_results,
     export_optimization_results,
@@ -159,6 +159,20 @@ def parse_args() -> argparse.Namespace:
         type=int,
         help="Limit the number of strategy parameter sets in optimization mode.",
     )
+    parser.add_argument(
+        "--optimization-grid",
+        choices=["fast", "default", "full"],
+        default="fast",
+        help="Optimization grid size. Defaults to fast.",
+    )
+    parser.add_argument(
+        "--optimization-start-date",
+        help="Optional optimization start date, YYYY-MM-DD.",
+    )
+    parser.add_argument(
+        "--optimization-end-date",
+        help="Optional optimization end date, YYYY-MM-DD.",
+    )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
     parser.add_argument(
@@ -284,6 +298,19 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
         return
 
     ohlc = load_ohlc_data(args.market_data, symbol=args.symbol)
+    ohlc = filter_ohlc_by_date(
+        ohlc,
+        start_date=args.optimization_start_date,
+        end_date=args.optimization_end_date,
+    )
+    if args.optimization_start_date or args.optimization_end_date:
+        print(
+            "\nOptimization date filter: "
+            f"{args.optimization_start_date or 'start'} to "
+            f"{args.optimization_end_date or 'end'}"
+        )
+        print(f"Optimization OHLC rows: {len(ohlc)}")
+
     rows = run_stochastic_optimization(
         ohlc=ohlc,
         presets=presets,
@@ -297,6 +324,7 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
             "force_close_time": args.force_close_time,
         },
         max_runs=args.max_optimization_runs,
+        grid_name=args.optimization_grid,
     )
     exported_files = export_optimization_results(rows)
     top_rows = sorted(

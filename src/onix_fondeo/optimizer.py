@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import product
+from time import perf_counter
 from typing import Any
 
 import pandas as pd
@@ -16,19 +17,50 @@ from onix_fondeo.strategies.stochastic_level import StochasticLevelStrategy
 from onix_fondeo.strategy_metrics import calculate_strategy_metrics
 
 
-def build_stochastic_parameter_grid() -> list[dict[str, Any]]:
-    grid_values = {
-        "stoch_k_period": [7, 14],
-        "stoch_d_period": [3],
-        "oversold": [20, 30],
-        "overbought": [70, 80],
-        "signal_mode": ["cross", "zone"],
-        "use_d_confirmation": [False, True],
-        "min_k_d_gap": [0, 2],
-        "cooldown_bars": [0, 5],
-        "stop_loss_points": [20, 30],
-        "take_profit_points": [30, 45],
+def build_stochastic_parameter_grid(grid_name: str = "fast") -> list[dict[str, Any]]:
+    grid_values_by_name = {
+        "fast": {
+            "stoch_k_period": [14],
+            "stoch_d_period": [3],
+            "oversold": [20, 30],
+            "overbought": [70, 80],
+            "signal_mode": ["cross"],
+            "use_d_confirmation": [False, True],
+            "min_k_d_gap": [0],
+            "cooldown_bars": [0, 5],
+            "stop_loss_points": [20, 30],
+            "take_profit_points": [30, 45],
+        },
+        "default": {
+            "stoch_k_period": [7, 14],
+            "stoch_d_period": [3],
+            "oversold": [20, 30],
+            "overbought": [70, 80],
+            "signal_mode": ["cross", "zone"],
+            "use_d_confirmation": [False, True],
+            "min_k_d_gap": [0],
+            "cooldown_bars": [0, 5],
+            "stop_loss_points": [20, 30],
+            "take_profit_points": [30, 45],
+        },
+        "full": {
+            "stoch_k_period": [7, 14, 21],
+            "stoch_d_period": [3, 5],
+            "oversold": [15, 20, 30],
+            "overbought": [70, 80, 85],
+            "signal_mode": ["cross", "zone"],
+            "use_d_confirmation": [False, True],
+            "min_k_d_gap": [0, 2, 5],
+            "cooldown_bars": [0, 5, 10],
+            "stop_loss_points": [15, 20, 30],
+            "take_profit_points": [30, 45, 60],
+        },
     }
+    if grid_name not in grid_values_by_name:
+        valid_names = ", ".join(sorted(grid_values_by_name))
+        raise ValueError(f"Unknown optimization grid: {grid_name}. Use: {valid_names}")
+
+    grid_values = grid_values_by_name[grid_name]
 
     keys = list(grid_values)
     return [
@@ -37,22 +69,52 @@ def build_stochastic_parameter_grid() -> list[dict[str, Any]]:
     ]
 
 
+def filter_ohlc_by_date(
+    ohlc: pd.DataFrame,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> pd.DataFrame:
+    filtered = ohlc.copy()
+    filtered["DateTime"] = pd.to_datetime(filtered["DateTime"])
+
+    if start_date is not None:
+        filtered = filtered[
+            filtered["DateTime"].dt.date >= pd.to_datetime(start_date).date()
+        ]
+    if end_date is not None:
+        filtered = filtered[
+            filtered["DateTime"].dt.date <= pd.to_datetime(end_date).date()
+        ]
+
+    return filtered.reset_index(drop=True)
+
+
 def run_stochastic_optimization(
     ohlc: pd.DataFrame,
     presets: list[dict],
     base_args: dict[str, Any] | None = None,
     max_runs: int | None = None,
+    grid_name: str = "fast",
 ) -> list[dict[str, Any]]:
+    start_time = perf_counter()
     base_args = base_args or {}
     runnable_presets = [
         preset for preset in presets if validate_preset_is_runnable(preset)[0]
     ]
-    parameter_grid = build_stochastic_parameter_grid()
+    parameter_grid = build_stochastic_parameter_grid(grid_name)
+    if len(parameter_grid) > 100 and max_runs is None:
+        print(
+            "Large optimization grid detected. Consider using "
+            "--max-optimization-runs or --optimization-grid fast."
+        )
     if max_runs is not None:
         parameter_grid = parameter_grid[:max_runs]
 
     rows = []
+    total_runs = len(parameter_grid)
+    preset_count = len(runnable_presets)
     for run_index, params in enumerate(parameter_grid, start=1):
+        print(f"Optimization run {run_index}/{total_runs} | Presets: {preset_count}")
         strategy = StochasticLevelStrategy(
             k_period=params["stoch_k_period"],
             d_period=params["stoch_d_period"],
@@ -95,6 +157,8 @@ def run_stochastic_optimization(
                 )
             )
 
+    elapsed_seconds = perf_counter() - start_time
+    print(f"Optimization completed in {elapsed_seconds:.2f} seconds.")
     return rows
 
 

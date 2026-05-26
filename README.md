@@ -202,6 +202,18 @@ Run stochastic optimization on one preset:
 PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/sample_NQ_1m.csv --preset tradeify_growth_50k --max-optimization-runs 20
 ```
 
+Run fast stochastic optimization on one week of MNQ data:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --preset tradeify_growth_50k --optimization-grid fast --optimization-start-date 2026-03-12 --optimization-end-date 2026-03-19 --symbol MNQ --point-value 2
+```
+
+Limit optimization runs:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --preset tradeify_growth_50k --optimization-grid fast --max-optimization-runs 10 --symbol MNQ --point-value 2
+```
+
 Compare stochastic optimization across presets:
 
 ```bash
