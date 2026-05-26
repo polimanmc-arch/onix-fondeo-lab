@@ -1,6 +1,10 @@
 import pandas as pd
 
-from onix_fondeo.backtester import TRADE_COLUMNS, backtest_strategy
+from onix_fondeo.backtester import (
+    TRADE_COLUMNS,
+    backtest_strategy,
+    backtest_strategy_for_phase_profiles,
+)
 from onix_fondeo.strategies.base import StrategySignal
 
 
@@ -201,6 +205,39 @@ def test_backtester_contracts_override_quantity():
 
     assert trade["Quantity"] == 2
     assert trade["GrossPnL"] == 200
+
+
+def test_backtest_strategy_for_phase_profiles_tags_trades():
+    trades = backtest_strategy_for_phase_profiles(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        evaluation_profile={
+            "contracts": 2,
+            "stop_loss_points": 5,
+            "take_profit_points": 5,
+        },
+        funded_profile={
+            "contracts": 1,
+            "stop_loss_points": 5,
+            "take_profit_points": 5,
+        },
+    )
+
+    assert set(trades["PhaseProfile"]) == {"EVALUATION", "FUNDED"}
+    assert set(trades["Quantity"]) == {1, 2}
+
+
+def test_backtest_strategy_for_phase_profiles_reassigns_unique_trade_ids():
+    trades = backtest_strategy_for_phase_profiles(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        evaluation_profile={"stop_loss_points": 5, "take_profit_points": 5},
+        funded_profile={"stop_loss_points": 5, "take_profit_points": 5},
+    )
+
+    assert list(trades["TradeID"]) == [1, 2]
+    assert trades["TradeID"].is_unique
 
 
 def _base_ohlc(high_second_bar: float, low_second_bar: float) -> pd.DataFrame:

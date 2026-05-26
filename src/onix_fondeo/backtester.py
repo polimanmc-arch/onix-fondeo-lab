@@ -81,6 +81,75 @@ def backtest_strategy(
     return pd.DataFrame(trades, columns=TRADE_COLUMNS)
 
 
+def backtest_strategy_for_phase_profiles(
+    ohlc: pd.DataFrame,
+    strategy: Any,
+    symbol: str = "NQ",
+    point_value: float = 20.0,
+    evaluation_profile: dict[str, Any] | None = None,
+    funded_profile: dict[str, Any] | None = None,
+    same_bar_exit_policy: str = "conservative",
+) -> pd.DataFrame:
+    trade_frames = []
+    if evaluation_profile is not None:
+        evaluation_trades = _backtest_with_profile(
+            ohlc=ohlc,
+            strategy=strategy,
+            symbol=symbol,
+            point_value=point_value,
+            profile=evaluation_profile,
+            same_bar_exit_policy=same_bar_exit_policy,
+        )
+        evaluation_trades["PhaseProfile"] = "EVALUATION"
+        trade_frames.append(evaluation_trades)
+
+    if funded_profile is not None:
+        funded_trades = _backtest_with_profile(
+            ohlc=ohlc,
+            strategy=strategy,
+            symbol=symbol,
+            point_value=point_value,
+            profile=funded_profile,
+            same_bar_exit_policy=same_bar_exit_policy,
+        )
+        funded_trades["PhaseProfile"] = "FUNDED"
+        trade_frames.append(funded_trades)
+
+    if not trade_frames:
+        return pd.DataFrame(columns=[*TRADE_COLUMNS, "PhaseProfile"])
+
+    trades = pd.concat(trade_frames, ignore_index=True)
+    trades = trades.sort_values(["ExitTime", "PhaseProfile"]).reset_index(drop=True)
+    trades["TradeID"] = range(1, len(trades) + 1)
+    return trades
+
+
+def _backtest_with_profile(
+    ohlc: pd.DataFrame,
+    strategy: Any,
+    symbol: str,
+    point_value: float,
+    profile: dict[str, Any],
+    same_bar_exit_policy: str,
+) -> pd.DataFrame:
+    return backtest_strategy(
+        ohlc=ohlc,
+        strategy=strategy,
+        symbol=symbol,
+        quantity=profile.get("quantity", 1),
+        contracts=profile.get("contracts"),
+        point_value=point_value,
+        stop_loss_points=profile.get("stop_loss_points", 30.0),
+        take_profit_points=profile.get("take_profit_points", 45.0),
+        max_holding_minutes=profile.get("max_holding_minutes", 60),
+        commission_per_side=profile.get("commission_per_side", 0.0),
+        slippage_points=profile.get("slippage_points", 0.0),
+        spread_points=profile.get("spread_points", 0.0),
+        same_bar_exit_policy=same_bar_exit_policy,
+        force_close_time=profile.get("force_close_time"),
+    )
+
+
 def _find_signal_index(data: pd.DataFrame, signal_time: Any) -> int | None:
     matches = data.index[data["DateTime"] == signal_time].tolist()
     if not matches:

@@ -290,6 +290,34 @@ For futures, MNQ point value is typically `2` and NQ point value is typically
 `20`. Commissions, slippage, and spread can materially change near-break-even
 strategies, so include realistic costs before trusting optimization rankings.
 
+Use phase risk profiles with aggressive evaluation and conservative funded
+execution:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main \
+  --market-data data/market_data/MNQ_1m.csv \
+  --strategy stochastic \
+  --preset tradeify_growth_50k \
+  --symbol MNQ \
+  --point-value 2 \
+  --use-phase-profiles \
+  --evaluation-contracts 3 \
+  --evaluation-stop-loss-points 30 \
+  --evaluation-take-profit-points 45 \
+  --funded-contracts 1 \
+  --funded-stop-loss-points 20 \
+  --funded-take-profit-points 30 \
+  --commission-per-side 1.24 \
+  --slippage-points 0.25 \
+  --spread-points 0.25 \
+  --bankroll 3000
+```
+
+Phase profiles use the same signal logic but different execution and risk
+settings. Evaluation can be more aggressive to seek passing the account, while
+funded can be more conservative to protect consistency and pursue payouts. This
+is an initial approximation before fully account-aware intratrade exits.
+
 Compare presets with bankroll tracking:
 
 ```bash

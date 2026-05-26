@@ -53,6 +53,7 @@ def calculate_strategy_metrics(trades: pd.DataFrame) -> dict[str, Any]:
         "total_slippage_cost": total_slippage_cost,
         "total_spread_cost": total_spread_cost,
         "total_cost": total_cost,
+        **_phase_profile_metrics(trades),
     }
 
 
@@ -98,6 +99,10 @@ def _empty_metrics() -> dict[str, Any]:
         "total_slippage_cost": 0.0,
         "total_spread_cost": 0.0,
         "total_cost": 0.0,
+        "evaluation_total_trades": 0,
+        "evaluation_net_pnl": 0.0,
+        "funded_total_trades": 0,
+        "funded_net_pnl": 0.0,
     }
 
 
@@ -158,3 +163,25 @@ def _sum_optional_column(trades: pd.DataFrame, column: str) -> float:
     if column not in trades.columns:
         return 0.0
     return float(pd.to_numeric(trades[column], errors="coerce").fillna(0.0).sum())
+
+
+def _phase_profile_metrics(trades: pd.DataFrame) -> dict[str, float | int]:
+    metrics = {
+        "evaluation_total_trades": 0,
+        "evaluation_net_pnl": 0.0,
+        "funded_total_trades": 0,
+        "funded_net_pnl": 0.0,
+    }
+    if "PhaseProfile" not in trades.columns:
+        return metrics
+
+    for phase, prefix in [("EVALUATION", "evaluation"), ("FUNDED", "funded")]:
+        phase_trades = trades[trades["PhaseProfile"] == phase]
+        phase_pnl = pd.to_numeric(
+            phase_trades.get("NetPnL", pd.Series(dtype=float)),
+            errors="coerce",
+        ).fillna(0.0)
+        metrics[f"{prefix}_total_trades"] = int(len(phase_trades))
+        metrics[f"{prefix}_net_pnl"] = float(phase_pnl.sum())
+
+    return metrics

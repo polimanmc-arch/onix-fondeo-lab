@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import pandas as pd
+
 from onix_fondeo.models import Account, Payout, Trade
 from onix_fondeo.rules import (
     check_evaluation_status,
@@ -72,6 +74,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
     current_trade_day = None
 
     for _, row in trades_df.iterrows():
+        phase_profile = _phase_profile_for_row(row)
         trade = row_to_trade(row)
         trade_day = _trade_day(trade)
         if current_trade_day is not None and trade_day != current_trade_day:
@@ -80,7 +83,11 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
 
         funded_accounts_for_trade = list(active_funded_accounts)
 
-        if active_eval is not None and active_eval.status == "ACTIVE":
+        if (
+            active_eval is not None
+            and active_eval.status == "ACTIVE"
+            and _trade_matches_account_phase(phase_profile, active_eval.phase)
+        ):
             applied_pnl = active_eval.apply_trade(
                 trade,
                 daily_profit_cap=evaluation_rules.get("daily_profit_cap"),
@@ -137,6 +144,8 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
         for funded_account in funded_accounts_for_trade:
             if funded_account.status != "ACTIVE":
                 continue
+            if not _trade_matches_account_phase(phase_profile, funded_account.phase):
+                continue
 
             applied_pnl = funded_account.apply_trade(trade)
             status, reason = check_funded_status(
@@ -181,6 +190,24 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
         "payouts": payouts,
         "business_events": business_events,
     }
+
+
+def _phase_profile_for_row(row: Any) -> str | None:
+    if "PhaseProfile" not in row:
+        return None
+    value = row.get("PhaseProfile")
+    if value is None or pd.isna(value):
+        return None
+    return str(value)
+
+
+def _trade_matches_account_phase(
+    phase_profile: str | None,
+    account_phase: str,
+) -> bool:
+    if phase_profile is None:
+        return True
+    return phase_profile == account_phase
 
 
 def _trade_day(trade: Trade) -> Any:

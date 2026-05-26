@@ -425,3 +425,121 @@ def test_simulate_funding_updates_eod_drawdown_floor_on_day_change():
     assert account.eod_high_pnl == 1000
     assert account.trailing_drawdown_floor == -1000
     assert account.drawdown_locked is False
+
+
+def test_simulate_funding_routes_phase_profile_trades_to_evaluation_only():
+    trades = pd.DataFrame(
+        [
+            _trade_row(1, 100, "EVALUATION"),
+            _trade_row(2, 999, "FUNDED"),
+        ]
+    )
+    config = _simple_evaluation_config()
+
+    results = simulate_funding(trades, config)
+    evaluation_account = results["accounts"][0]
+
+    assert evaluation_account.trades_count == 1
+    assert evaluation_account.pnl == 100
+    assert len(results["trade_log"]) == 1
+
+
+def test_simulate_funding_straight_to_funded_consumes_funded_phase_profile():
+    trades = pd.DataFrame(
+        [
+            _trade_row(1, 1000, "EVALUATION"),
+            _trade_row(2, 600, "FUNDED"),
+        ]
+    )
+    config = _simple_straight_to_funded_config()
+
+    results = simulate_funding(trades, config)
+    funded_account = results["accounts"][0]
+
+    assert funded_account.trades_count == 1
+    assert funded_account.pnl == 600
+    assert len(results["trade_log"]) == 1
+
+
+def test_simulate_funding_without_phase_profile_keeps_old_behavior():
+    trades = pd.DataFrame(
+        [
+            _trade_row(1, 1000, None),
+            _trade_row(2, 600, None),
+        ]
+    )
+    config = _simple_straight_to_funded_config()
+
+    results = simulate_funding(trades, config)
+    funded_account = results["accounts"][0]
+
+    assert funded_account.trades_count == 2
+    assert funded_account.pnl == 1600
+
+
+def _trade_row(trade_id: int, net_pnl: float, phase_profile: str | None) -> dict:
+    row = {
+        "TradeID": trade_id,
+        "EntryTime": datetime(2026, 5, 20, 9, 30),
+        "ExitTime": datetime(2026, 5, 20, 10, trade_id),
+        "Symbol": "NQ",
+        "Direction": "Long",
+        "Quantity": 1,
+        "NetPnL": net_pnl,
+    }
+    if phase_profile is not None:
+        row["PhaseProfile"] = phase_profile
+    return row
+
+
+def _simple_evaluation_config() -> dict:
+    return {
+        "evaluation": {
+            "enabled": True,
+            "evaluation_cost": 100,
+            "profit_target": 999999,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_trading_days": 1,
+            "daily_profit_cap": None,
+            "consistency_enabled": False,
+            "consistency_percent": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 999999,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+    }
+
+
+def _simple_straight_to_funded_config() -> dict:
+    return {
+        "evaluation": {
+            "enabled": False,
+            "evaluation_cost": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 999999,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": True,
+        },
+    }

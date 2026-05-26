@@ -1,7 +1,10 @@
 import argparse
 from pathlib import Path
 
-from onix_fondeo.backtester import backtest_strategy
+from onix_fondeo.backtester import (
+    backtest_strategy,
+    backtest_strategy_for_phase_profiles,
+)
 from onix_fondeo.bankroll import calculate_bankroll_curve
 from onix_fondeo.loader import (
     config_from_preset,
@@ -255,6 +258,27 @@ def parse_args() -> argparse.Namespace:
         help='Optional time-of-day force close, for example "15:55".',
     )
     parser.add_argument(
+        "--use-phase-profiles",
+        action="store_true",
+        help="Generate separate EVALUATION and FUNDED trade streams.",
+    )
+    parser.add_argument("--evaluation-contracts", type=float)
+    parser.add_argument("--evaluation-stop-loss-points", type=float)
+    parser.add_argument("--evaluation-take-profit-points", type=float)
+    parser.add_argument("--evaluation-max-holding-minutes", type=int)
+    parser.add_argument("--evaluation-commission-per-side", type=float)
+    parser.add_argument("--evaluation-slippage-points", type=float)
+    parser.add_argument("--evaluation-spread-points", type=float)
+    parser.add_argument("--evaluation-force-close-time")
+    parser.add_argument("--funded-contracts", type=float)
+    parser.add_argument("--funded-stop-loss-points", type=float)
+    parser.add_argument("--funded-take-profit-points", type=float)
+    parser.add_argument("--funded-max-holding-minutes", type=int)
+    parser.add_argument("--funded-commission-per-side", type=float)
+    parser.add_argument("--funded-slippage-points", type=float)
+    parser.add_argument("--funded-spread-points", type=float)
+    parser.add_argument("--funded-force-close-time")
+    parser.add_argument(
         "--random-probability",
         type=float,
         default=0.005,
@@ -456,22 +480,33 @@ def load_or_generate_trades(args: argparse.Namespace):
 
     ohlc = load_ohlc_data(args.market_data, symbol=args.symbol)
     strategy = build_strategy_from_args(args)
-    trades = backtest_strategy(
-        ohlc=ohlc,
-        strategy=strategy,
-        symbol=args.symbol,
-        quantity=args.quantity,
-        contracts=args.contracts,
-        point_value=args.point_value,
-        stop_loss_points=args.stop_loss_points,
-        take_profit_points=args.take_profit_points,
-        max_holding_minutes=args.max_holding_minutes,
-        commission_per_side=args.commission_per_side,
-        slippage_points=args.slippage_points,
-        spread_points=args.spread_points,
-        same_bar_exit_policy=args.same_bar_exit_policy,
-        force_close_time=args.force_close_time,
-    )
+    if args.use_phase_profiles:
+        trades = backtest_strategy_for_phase_profiles(
+            ohlc=ohlc,
+            strategy=strategy,
+            symbol=args.symbol,
+            point_value=args.point_value,
+            evaluation_profile=_phase_profile_from_args(args, "evaluation"),
+            funded_profile=_phase_profile_from_args(args, "funded"),
+            same_bar_exit_policy=args.same_bar_exit_policy,
+        )
+    else:
+        trades = backtest_strategy(
+            ohlc=ohlc,
+            strategy=strategy,
+            symbol=args.symbol,
+            quantity=args.quantity,
+            contracts=args.contracts,
+            point_value=args.point_value,
+            stop_loss_points=args.stop_loss_points,
+            take_profit_points=args.take_profit_points,
+            max_holding_minutes=args.max_holding_minutes,
+            commission_per_side=args.commission_per_side,
+            slippage_points=args.slippage_points,
+            spread_points=args.spread_points,
+            same_bar_exit_policy=args.same_bar_exit_policy,
+            force_close_time=args.force_close_time,
+        )
 
     output_dir = Path("data/output")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -495,6 +530,65 @@ def load_or_generate_trades(args: argparse.Namespace):
     print(f"Strategy metrics JSON: {strategy_metrics_path}")
 
     return trades, strategy_metrics
+
+
+def _phase_profile_from_args(args: argparse.Namespace, phase: str) -> dict:
+    return {
+        "quantity": args.quantity,
+        "contracts": _phase_value(args, phase, "contracts", args.contracts),
+        "stop_loss_points": _phase_value(
+            args,
+            phase,
+            "stop_loss_points",
+            args.stop_loss_points,
+        ),
+        "take_profit_points": _phase_value(
+            args,
+            phase,
+            "take_profit_points",
+            args.take_profit_points,
+        ),
+        "max_holding_minutes": _phase_value(
+            args,
+            phase,
+            "max_holding_minutes",
+            args.max_holding_minutes,
+        ),
+        "commission_per_side": _phase_value(
+            args,
+            phase,
+            "commission_per_side",
+            args.commission_per_side,
+        ),
+        "slippage_points": _phase_value(
+            args,
+            phase,
+            "slippage_points",
+            args.slippage_points,
+        ),
+        "spread_points": _phase_value(
+            args,
+            phase,
+            "spread_points",
+            args.spread_points,
+        ),
+        "force_close_time": _phase_value(
+            args,
+            phase,
+            "force_close_time",
+            args.force_close_time,
+        ),
+    }
+
+
+def _phase_value(
+    args: argparse.Namespace,
+    phase: str,
+    field_name: str,
+    fallback: object,
+) -> object:
+    value = getattr(args, f"{phase}_{field_name}")
+    return fallback if value is None else value
 
 
 def _format_metric(value: float) -> str:

@@ -105,6 +105,22 @@ def test_strategy_metrics_sum_trade_cost_columns():
     assert metrics["total_cost"] == 38
 
 
+def test_strategy_metrics_include_phase_profile_breakdown():
+    trades = pd.DataFrame(
+        {
+            "NetPnL": [100, 50, -25],
+            "PhaseProfile": ["EVALUATION", "FUNDED", "FUNDED"],
+        }
+    )
+
+    metrics = calculate_strategy_metrics(trades)
+
+    assert metrics["evaluation_total_trades"] == 1
+    assert metrics["evaluation_net_pnl"] == 100
+    assert metrics["funded_total_trades"] == 2
+    assert metrics["funded_net_pnl"] == 25
+
+
 def test_export_strategy_metrics_writes_json(tmp_path: Path):
     metrics = calculate_strategy_metrics(pd.DataFrame({"NetPnL": [100]}))
 
