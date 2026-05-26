@@ -37,6 +37,7 @@ def test_stochastic_cross_mode_generates_long_signal():
     strategy = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -56,6 +57,7 @@ def test_stochastic_cross_mode_generates_short_signal():
     strategy = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=False,
@@ -75,6 +77,7 @@ def test_stochastic_zone_mode_repeats_signals_but_respects_cooldown():
     no_cooldown = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -85,6 +88,7 @@ def test_stochastic_zone_mode_repeats_signals_but_respects_cooldown():
     with_cooldown = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -110,6 +114,7 @@ def test_stochastic_d_confirmation_blocks_signal_when_relationship_fails():
     strategy = StochasticLevelStrategy(
         k_period=1,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -128,6 +133,7 @@ def test_stochastic_min_k_d_gap_filters_small_confirmation_gap():
     loose_gap = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -138,6 +144,7 @@ def test_stochastic_min_k_d_gap_filters_small_confirmation_gap():
     strict_gap = StochasticLevelStrategy(
         k_period=3,
         d_period=2,
+        smooth=1,
         oversold_level=20,
         overbought_level=80,
         allow_long=True,
@@ -148,6 +155,64 @@ def test_stochastic_min_k_d_gap_filters_small_confirmation_gap():
 
     assert len(loose_gap.generate_signals(ohlc)) == 1
     assert strict_gap.generate_signals(ohlc) == []
+
+
+def test_stochastic_matches_ninjatrader_smoothing_chain():
+    ohlc = _stoch_ohlc([10, 20, 30, 40, 50, 60])
+    strategy = StochasticLevelStrategy(period_k=3, smooth=2, period_d=2)
+
+    fast_k, percent_k, percent_d = strategy.calculate_stochastics(ohlc)
+
+    assert fast_k.iloc[2] == 30
+    assert fast_k.iloc[3] == 40
+    assert percent_k.iloc[3] == 35
+    assert percent_k.iloc[4] == 45
+    assert percent_d.iloc[4] == 40
+
+
+def test_stochastic_den_zero_uses_50_then_previous_fast_k():
+    ohlc = pd.DataFrame(
+        {
+            "DateTime": pd.date_range("2026-05-20 09:30:00", periods=4, freq="min"),
+            "Open": [100, 100, 100, 100],
+            "High": [100, 100, 100, 100],
+            "Low": [100, 100, 100, 100],
+            "Close": [100, 100, 100, 100],
+        }
+    )
+    strategy = StochasticLevelStrategy(period_k=2, smooth=1, period_d=1)
+
+    fast_k, percent_k, percent_d = strategy.calculate_stochastics(ohlc)
+
+    assert fast_k.iloc[1] == 50
+    assert fast_k.iloc[2] == 50
+    assert percent_k.iloc[2] == 50
+    assert percent_d.iloc[2] == 50
+
+
+def test_stochastic_fast_k_is_clamped_between_0_and_100():
+    ohlc = pd.DataFrame(
+        {
+            "DateTime": pd.date_range("2026-05-20 09:30:00", periods=4, freq="min"),
+            "Open": [0, 0, 0, 0],
+            "High": [100, 100, 100, 100],
+            "Low": [0, 0, 0, 0],
+            "Close": [50, 150, -50, 50],
+        }
+    )
+    strategy = StochasticLevelStrategy(period_k=2, smooth=1, period_d=1)
+
+    fast_k, _, _ = strategy.calculate_stochastics(ohlc)
+
+    assert fast_k.iloc[1] == 100
+    assert fast_k.iloc[2] == 0
+
+
+def test_stochastic_backward_compatible_period_aliases():
+    strategy = StochasticLevelStrategy(k_period=20, d_period=5)
+
+    assert strategy.period_k == 20
+    assert strategy.period_d == 5
 
 
 def _sample_ohlc(rows: int) -> pd.DataFrame:

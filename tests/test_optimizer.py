@@ -37,6 +37,7 @@ def test_stochastic_parameter_grid_contains_required_keys():
     assert {
         "stoch_k_period",
         "stoch_d_period",
+        "stoch_smooth",
         "oversold",
         "overbought",
         "signal_mode",

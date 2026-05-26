@@ -13,6 +13,8 @@ if str(SRC_DIR) not in sys.path:
 
 import streamlit as st
 import pandas as pd
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 from onix_fondeo.backtester import backtest_strategy
 from onix_fondeo.bankroll import calculate_bankroll_curve
@@ -49,14 +51,18 @@ def main() -> None:
 
     controls = sidebar_controls()
 
-    if not controls["run_analysis"]:
+    if controls["run_analysis"]:
+        try:
+            run_analysis(controls)
+        except Exception as error:
+            st.error(f"Analysis failed: {error}")
+
+    analysis_state = get_analysis_state()
+    if analysis_state is None:
         st.info("Configure the sidebar and click Run Analysis.")
         return
 
-    try:
-        run_analysis(controls)
-    except Exception as error:
-        st.error(f"Analysis failed: {error}")
+    render_outputs_from_state(analysis_state)
 
 
 def sidebar_controls() -> dict[str, Any]:
@@ -261,8 +267,8 @@ def run_analysis(controls: dict[str, Any]) -> None:
         risk_result,
         required_bankroll,
     )
-
-    render_outputs(
+    store_analysis_results(
+        ohlc,
         trades,
         strategy_metrics,
         business_metrics,
@@ -271,6 +277,9 @@ def run_analysis(controls: dict[str, Any]) -> None:
         risk_result,
         required_bankroll,
         exported_files,
+        preset,
+        controls,
+        config,
     )
 
 
@@ -299,7 +308,76 @@ def build_strategy(controls: dict[str, Any]):
     )
 
 
+def store_analysis_results(
+    ohlc_df: pd.DataFrame,
+    trades_df: pd.DataFrame,
+    strategy_metrics: dict[str, Any],
+    business_metrics: dict[str, Any],
+    bankroll_result: dict[str, Any] | None,
+    streak_analysis: dict[str, Any],
+    risk_of_ruin_result: dict[str, Any] | None,
+    required_bankroll_result: dict[str, Any] | None,
+    exported_files: dict[str, Path],
+    preset: dict[str, Any],
+    controls: dict[str, Any],
+    config: dict[str, Any],
+) -> None:
+    st.session_state["analysis_ran"] = True
+    st.session_state["analysis"] = {
+        "ohlc_df": ohlc_df,
+        "trades_df": trades_df,
+        "strategy_metrics": strategy_metrics,
+        "business_metrics": business_metrics,
+        "bankroll_result": bankroll_result,
+        "risk_of_ruin_result": risk_of_ruin_result,
+        "required_bankroll_result": required_bankroll_result,
+        "streak_analysis": streak_analysis,
+        "exported_files": exported_files,
+        "selected_preset": {
+            "preset_id": preset.get("preset_id"),
+            "company": preset.get("company"),
+            "plan": preset.get("plan"),
+            "account_name": preset.get("account_name"),
+            "account_size": preset.get("account_size"),
+        },
+        "selected_strategy_name": controls.get("strategy_name"),
+        "strategy_params": controls.get("strategy_params", {}),
+        "risk_settings": {
+            "stop_loss_points": controls.get("stop_loss_points"),
+            "take_profit_points": controls.get("take_profit_points"),
+            "max_holding_minutes": controls.get("max_holding_minutes"),
+            "contracts": controls.get("contracts"),
+        },
+        "config_summary": {
+            "evaluation_enabled": config.get("evaluation", {}).get("enabled"),
+            "funded_enabled": config.get("funded", {}).get("enabled"),
+        },
+    }
+
+
+def get_analysis_state() -> dict[str, Any] | None:
+    if not st.session_state.get("analysis_ran"):
+        return None
+    return st.session_state.get("analysis")
+
+
+def render_outputs_from_state(analysis_state: dict[str, Any]) -> None:
+    render_outputs(
+        analysis_state["ohlc_df"],
+        analysis_state["trades_df"],
+        analysis_state["strategy_metrics"],
+        analysis_state["business_metrics"],
+        analysis_state["bankroll_result"],
+        analysis_state["streak_analysis"],
+        analysis_state["risk_of_ruin_result"],
+        analysis_state["required_bankroll_result"],
+        analysis_state["exported_files"],
+        analysis_state,
+    )
+
+
 def render_outputs(
+    ohlc,
     trades,
     strategy_metrics: dict[str, Any],
     business_metrics: dict[str, Any],
@@ -308,6 +386,7 @@ def render_outputs(
     risk_result: dict[str, Any] | None,
     required_bankroll: dict[str, Any] | None,
     exported_files: dict[str, Path],
+    analysis_state: dict[str, Any] | None = None,
 ) -> None:
     (
         overview_tab,
@@ -317,6 +396,7 @@ def render_outputs(
         bankroll_tab,
         risk_tab,
         trades_tab,
+        backtest_tab,
     ) = st.tabs(
         [
             "Overview",
@@ -326,6 +406,7 @@ def render_outputs(
             "Bankroll",
             "Risk",
             "Trades",
+            "Backtest",
         ]
     )
 
@@ -345,6 +426,7 @@ def render_outputs(
 
     with strategy_tab:
         render_strategy_summary(strategy_metrics)
+        render_trade_pnl_charts(trades)
 
     with diagnostics_tab:
         render_diagnostics_tab(trades, strategy_metrics)
@@ -362,6 +444,9 @@ def render_outputs(
     with trades_tab:
         st.subheader("Generated Trades")
         st.dataframe(trades.head(500), use_container_width=True)
+
+    with backtest_tab:
+        render_backtest_trade_explorer(analysis_state or {})
 
 
 def render_strategy_summary(strategy_metrics: dict[str, Any]) -> None:
@@ -383,6 +468,56 @@ def render_strategy_summary(strategy_metrics: dict[str, Any]) -> None:
         )
     if strategy_metrics.get("total_trades", 0) < 30:
         st.warning("Small sample size: strategy metrics may not be reliable.")
+
+
+def render_trade_pnl_charts(trades_df: pd.DataFrame) -> None:
+    if trades_df.empty or "NetPnL" not in trades_df.columns:
+        st.info("No NetPnL data available for trade PnL charts.")
+        return
+
+    pnl_data = prepare_trade_pnl_chart_data(trades_df)
+    st.subheader("Trade PnL")
+    bar_colors = [
+        "#16a34a" if value >= 0 else "#dc2626"
+        for value in pnl_data["NetPnL"]
+    ]
+    pnl_fig = go.Figure(
+        data=[
+            go.Bar(
+                x=pnl_data["TradeIndex"],
+                y=pnl_data["NetPnL"],
+                marker_color=bar_colors,
+                hovertemplate="Trade %{x}<br>Net PnL: $%{y:,.2f}<extra></extra>",
+            )
+        ]
+    )
+    pnl_fig.update_layout(
+        xaxis_title="Trade",
+        yaxis_title="Net PnL",
+        height=360,
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+    st.plotly_chart(pnl_fig, use_container_width=True)
+
+    st.subheader("Cumulative Trade PnL")
+    equity_fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=pnl_data["TradeIndex"],
+                y=pnl_data["CumulativeNetPnL"],
+                mode="lines",
+                line=dict(color="#2563eb", width=2),
+                hovertemplate="Trade %{x}<br>Cumulative PnL: $%{y:,.2f}<extra></extra>",
+            )
+        ]
+    )
+    equity_fig.update_layout(
+        xaxis_title="Trade",
+        yaxis_title="Cumulative Net PnL",
+        height=360,
+        margin=dict(l=20, r=20, t=30, b=20),
+    )
+    st.plotly_chart(equity_fig, use_container_width=True)
 
 
 def render_funding_summary(business_metrics: dict[str, Any]) -> None:
@@ -416,6 +551,41 @@ def render_bankroll_summary(bankroll_result: dict[str, Any] | None) -> None:
             ("Max Drawdown", _money(metrics["max_bankroll_drawdown"])),
         ]
     )
+    render_bankroll_chart(bankroll_result)
+
+
+def render_bankroll_chart(bankroll_result: dict[str, Any]) -> None:
+    curve = bankroll_result.get("curve", [])
+    if not curve:
+        st.info("No bankroll curve is available.")
+        return
+
+    curve_df = pd.DataFrame(curve)
+    if "bankroll" not in curve_df.columns:
+        st.info("No bankroll values are available for charting.")
+        return
+
+    x_column = "time" if "time" in curve_df.columns and curve_df["time"].notna().any() else "step"
+    fig = go.Figure(
+        data=[
+            go.Scatter(
+                x=curve_df[x_column],
+                y=curve_df["bankroll"],
+                mode="lines+markers",
+                line=dict(color="#2563eb", width=2),
+                hovertemplate="Step: %{x}<br>Bankroll: $%{y:,.2f}<extra></extra>",
+            )
+        ]
+    )
+    fig.update_layout(
+        title="Bankroll Evolution",
+        xaxis_title="Event",
+        yaxis_title="Bankroll",
+        height=380,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(curve_df, use_container_width=True)
 
 
 def render_risk_summary(
@@ -564,6 +734,582 @@ def render_diagnostics_tab(
                     f"Best day: {best_day['Date']} ({format_currency_full(best_day['NetPnL'])}) | "
                     f"Worst day: {worst_day['Date']} ({format_currency_full(worst_day['NetPnL'])})"
                 )
+
+
+def render_backtest_chart(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame) -> None:
+    st.info(
+        "For performance, the backtest chart is limited to a filtered date range "
+        "and a maximum number of bars/trades."
+    )
+    ohlc = prepare_ohlc_for_chart(ohlc_df)
+    if ohlc.empty:
+        st.info("No OHLC data available for the backtest chart.")
+        return
+
+    available_dates = sorted(ohlc["DateTime"].dt.date.unique())
+    if not available_dates:
+        st.info("No valid OHLC timestamps available for the backtest chart.")
+        return
+
+    control_cols = st.columns(4)
+    with control_cols[0]:
+        selected_day = st.selectbox("Trading day", options=available_dates, index=0)
+    with control_cols[1]:
+        max_bars = st.number_input("Max bars", min_value=50, max_value=5000, value=500, step=50)
+    with control_cols[2]:
+        max_trades = st.number_input("Max trades", min_value=1, max_value=1000, value=100, step=10)
+    with control_cols[3]:
+        direction_filter = st.selectbox("Direction", options=["All", "Long only", "Short only"])
+
+    option_cols = st.columns(2)
+    with option_cols[0]:
+        show_exit_markers = st.checkbox("Show exit markers", value=True)
+    with option_cols[1]:
+        show_entry_exit_lines = st.checkbox("Show entry-exit lines", value=True)
+
+    day_ohlc = ohlc[ohlc["DateTime"].dt.date == selected_day].head(int(max_bars))
+    if day_ohlc.empty:
+        st.info("No bars found for the selected date.")
+        return
+
+    start_dt = day_ohlc["DateTime"].min()
+    end_dt = day_ohlc["DateTime"].max()
+    chart_trades = filter_trades_for_chart(
+        trades_df,
+        start_dt=start_dt,
+        end_dt=end_dt,
+        direction_filter=direction_filter,
+        max_trades=int(max_trades),
+    )
+    if chart_trades.empty:
+        st.info("No trades found in the selected chart range.")
+
+    fig = build_backtest_price_figure(
+        day_ohlc,
+        chart_trades,
+        show_exit_markers=show_exit_markers,
+        show_entry_exit_lines=show_entry_exit_lines,
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_backtest_trade_explorer(analysis_state: dict[str, Any]) -> None:
+    st.subheader("Backtest Trade Explorer")
+    ohlc_df = analysis_state.get("ohlc_df")
+    trades_df = analysis_state.get("trades_df")
+    if ohlc_df is None or trades_df is None or trades_df.empty:
+        st.info("No trades or OHLC data available for the trade explorer.")
+        return
+
+    trades = prepare_trades_for_explorer(trades_df)
+    if trades.empty:
+        st.info("No valid trades available for the trade explorer.")
+        return
+
+    filters = render_trade_explorer_filters(trades)
+    filtered_trades = filter_trades_for_explorer(trades, filters)
+    if filtered_trades.empty:
+        st.warning("No trades match the selected filters.")
+        return
+
+    display_columns = [
+        column
+        for column in [
+            "TradeID",
+            "EntryTime",
+            "ExitTime",
+            "Direction",
+            "EntryPrice",
+            "ExitPrice",
+            "NetPnL",
+            "ExitReason",
+            "PhaseProfile",
+            "StrategyName",
+        ]
+        if column in filtered_trades.columns
+    ]
+    st.dataframe(filtered_trades[display_columns].head(1000), use_container_width=True)
+
+    # Future: replace selectbox with interactive row selection / double-click using streamlit-aggrid.
+    trade_ids = filtered_trades["TradeID"].tolist()
+    selected_trade_id = st.selectbox("Select TradeID to inspect", options=trade_ids)
+    selected_trade = filtered_trades[filtered_trades["TradeID"] == selected_trade_id].iloc[0]
+    context_minutes = st.number_input(
+        "Context minutes before/after",
+        min_value=5,
+        max_value=240,
+        value=60,
+        step=5,
+    )
+    render_selected_trade_chart(
+        ohlc_df=ohlc_df,
+        selected_trade=selected_trade,
+        analysis_state=analysis_state,
+        context_minutes=int(context_minutes),
+    )
+
+
+def render_trade_explorer_filters(trades: pd.DataFrame) -> dict[str, Any]:
+    filter_cols = st.columns(3)
+    with filter_cols[0]:
+        direction_filter = st.selectbox(
+            "Direction filter",
+            options=["All", "Long", "Short"],
+            key="explorer_direction_filter",
+        )
+    exit_reasons = ["All"]
+    if "ExitReason" in trades.columns:
+        exit_reasons.extend(sorted(str(value) for value in trades["ExitReason"].dropna().unique()))
+    with filter_cols[1]:
+        exit_reason_filter = st.selectbox(
+            "ExitReason filter",
+            options=exit_reasons,
+            key="explorer_exit_reason_filter",
+        )
+    phase_options = ["All"]
+    if "PhaseProfile" in trades.columns:
+        phase_options.extend(sorted(str(value) for value in trades["PhaseProfile"].dropna().unique()))
+    with filter_cols[2]:
+        phase_filter = st.selectbox(
+            "PhaseProfile filter",
+            options=phase_options,
+            key="explorer_phase_filter",
+        )
+
+    date_values = ["All dates"]
+    if "EntryTime" in trades.columns:
+        date_values.extend(
+            str(value)
+            for value in sorted(trades["EntryTime"].dt.date.dropna().unique())
+        )
+    range_cols = st.columns(3)
+    with range_cols[0]:
+        selected_date = st.selectbox(
+            "Entry date",
+            options=date_values,
+            key="explorer_date_filter",
+        )
+    min_pnl = float(trades["NetPnL"].min()) if "NetPnL" in trades.columns else 0.0
+    max_pnl = float(trades["NetPnL"].max()) if "NetPnL" in trades.columns else 0.0
+    with range_cols[1]:
+        minimum_net_pnl = st.number_input(
+            "Minimum NetPnL",
+            value=min_pnl,
+            key="explorer_min_net_pnl",
+        )
+    with range_cols[2]:
+        maximum_net_pnl = st.number_input(
+            "Maximum NetPnL",
+            value=max_pnl,
+            key="explorer_max_net_pnl",
+        )
+
+    return {
+        "direction": direction_filter,
+        "exit_reason": exit_reason_filter,
+        "phase_profile": phase_filter,
+        "entry_date": selected_date,
+        "minimum_net_pnl": minimum_net_pnl,
+        "maximum_net_pnl": maximum_net_pnl,
+    }
+
+
+def prepare_trades_for_explorer(trades_df: pd.DataFrame) -> pd.DataFrame:
+    trades = trades_df.copy().reset_index(drop=True)
+    if "TradeID" not in trades.columns:
+        trades["TradeID"] = range(1, len(trades) + 1)
+    for column in ["EntryTime", "ExitTime"]:
+        if column in trades.columns:
+            trades[column] = pd.to_datetime(trades[column], errors="coerce")
+    for column in ["EntryPrice", "ExitPrice", "NetPnL"]:
+        if column in trades.columns:
+            trades[column] = pd.to_numeric(trades[column], errors="coerce")
+    if "NetPnL" not in trades.columns:
+        trades["NetPnL"] = 0.0
+    return trades.dropna(subset=["EntryTime", "ExitTime"], how="all")
+
+
+def filter_trades_for_explorer(
+    trades_df: pd.DataFrame,
+    filters: dict[str, Any],
+) -> pd.DataFrame:
+    trades = prepare_trades_for_explorer(trades_df)
+    if filters.get("direction") in {"Long", "Short"} and "Direction" in trades.columns:
+        trades = trades[trades["Direction"] == filters["direction"]]
+    if filters.get("exit_reason") not in {None, "All"} and "ExitReason" in trades.columns:
+        trades = trades[trades["ExitReason"].astype(str) == filters["exit_reason"]]
+    if filters.get("phase_profile") not in {None, "All"} and "PhaseProfile" in trades.columns:
+        trades = trades[trades["PhaseProfile"].astype(str) == filters["phase_profile"]]
+    if filters.get("entry_date") not in {None, "All dates"} and "EntryTime" in trades.columns:
+        selected_date = pd.to_datetime(filters["entry_date"]).date()
+        trades = trades[trades["EntryTime"].dt.date == selected_date]
+    minimum_net_pnl = filters.get("minimum_net_pnl")
+    maximum_net_pnl = filters.get("maximum_net_pnl")
+    if minimum_net_pnl is not None:
+        trades = trades[trades["NetPnL"] >= float(minimum_net_pnl)]
+    if maximum_net_pnl is not None:
+        trades = trades[trades["NetPnL"] <= float(maximum_net_pnl)]
+    return trades.sort_values("EntryTime").reset_index(drop=True)
+
+
+def render_selected_trade_chart(
+    ohlc_df: pd.DataFrame,
+    selected_trade: pd.Series,
+    analysis_state: dict[str, Any],
+    context_minutes: int,
+) -> None:
+    entry_time = pd.to_datetime(selected_trade.get("EntryTime"), errors="coerce")
+    exit_time = pd.to_datetime(selected_trade.get("ExitTime"), errors="coerce")
+    if pd.isna(entry_time) or pd.isna(exit_time):
+        st.error("Selected trade timestamps could not be parsed.")
+        return
+
+    start_dt = entry_time - pd.Timedelta(minutes=context_minutes)
+    end_dt = exit_time + pd.Timedelta(minutes=context_minutes)
+    ohlc = prepare_ohlc_for_chart(ohlc_df)
+    ohlc_window = ohlc[(ohlc["DateTime"] >= start_dt) & (ohlc["DateTime"] <= end_dt)]
+    if ohlc_window.empty:
+        st.warning("No OHLC bars found around selected trade.")
+        return
+
+    strategy_context = {
+        "strategy_name": analysis_state.get("selected_strategy_name"),
+        "strategy_params": analysis_state.get("strategy_params", {}),
+        "risk_settings": analysis_state.get("risk_settings", {}),
+    }
+    fig = build_selected_trade_figure(ohlc_window, selected_trade, strategy_context)
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def build_selected_trade_figure(
+    ohlc_window: pd.DataFrame,
+    selected_trade: pd.Series,
+    strategy_context: dict[str, Any],
+) -> go.Figure:
+    show_stochastic = strategy_context.get("strategy_name") == "stochastic"
+    if show_stochastic:
+        fig = make_subplots(
+            rows=2,
+            cols=1,
+            shared_xaxes=True,
+            vertical_spacing=0.04,
+            row_heights=[0.72, 0.28],
+        )
+    else:
+        fig = make_subplots(rows=1, cols=1)
+
+    fig.add_trace(
+        go.Candlestick(
+            x=ohlc_window["DateTime"],
+            open=ohlc_window["Open"],
+            high=ohlc_window["High"],
+            low=ohlc_window["Low"],
+            close=ohlc_window["Close"],
+            name="OHLC",
+        ),
+        row=1,
+        col=1,
+    )
+
+    _add_selected_trade_marker(fig, selected_trade, "entry")
+    _add_selected_trade_marker(fig, selected_trade, "exit")
+    _add_selected_trade_line(fig, selected_trade)
+    _add_sl_tp_lines(fig, selected_trade, strategy_context.get("risk_settings", {}))
+
+    if show_stochastic:
+        stoch = compute_stochastic_for_chart(
+            ohlc_window,
+            strategy_context.get("strategy_params", {}),
+        )
+        if not stoch.empty:
+            fig.add_trace(
+                go.Scatter(x=stoch["DateTime"], y=stoch["K"], mode="lines", name="K"),
+                row=2,
+                col=1,
+            )
+            fig.add_trace(
+                go.Scatter(x=stoch["DateTime"], y=stoch["D"], mode="lines", name="D"),
+                row=2,
+                col=1,
+            )
+            oversold = strategy_context.get("strategy_params", {}).get("oversold", 20)
+            overbought = strategy_context.get("strategy_params", {}).get("overbought", 80)
+            fig.add_hline(y=oversold, line_dash="dot", line_color="#64748b", row=2, col=1)
+            fig.add_hline(y=overbought, line_dash="dot", line_color="#64748b", row=2, col=1)
+            fig.update_yaxes(title_text="Stoch K/D", row=2, col=1, range=[0, 100])
+
+    trade_id = selected_trade.get("TradeID")
+    direction = selected_trade.get("Direction", "")
+    net_pnl = _numeric_value(selected_trade.get("NetPnL"))
+    exit_reason = selected_trade.get("ExitReason", "")
+    fig.update_layout(
+        title=(
+            f"Trade {trade_id} | {direction} | NetPnL "
+            f"{format_currency_full(net_pnl)} | ExitReason {exit_reason}"
+        ),
+        xaxis_rangeslider_visible=False,
+        height=760 if show_stochastic else 620,
+        margin=dict(l=20, r=20, t=55, b=20),
+    )
+    fig.update_yaxes(title_text="Price", row=1, col=1)
+    return fig
+
+
+def compute_stochastic_for_chart(
+    ohlc_df: pd.DataFrame,
+    strategy_params: dict[str, Any],
+) -> pd.DataFrame:
+    if ohlc_df.empty:
+        return pd.DataFrame(columns=["DateTime", "K", "D"])
+    strategy = StochasticLevelStrategy(
+        period_k=int(strategy_params.get("period_k", 14)),
+        period_d=int(strategy_params.get("period_d", 7)),
+        smooth=int(strategy_params.get("smooth", 3)),
+    )
+    _, percent_k, percent_d = strategy.calculate_stochastics(ohlc_df)
+    return pd.DataFrame(
+        {
+            "DateTime": ohlc_df["DateTime"],
+            "K": percent_k,
+            "D": percent_d,
+        }
+    )
+
+
+def _add_selected_trade_marker(fig: go.Figure, trade: pd.Series, marker_type: str) -> None:
+    is_entry = marker_type == "entry"
+    time_column = "EntryTime" if is_entry else "ExitTime"
+    price_column = "EntryPrice" if is_entry else "ExitPrice"
+    time_value = pd.to_datetime(trade.get(time_column), errors="coerce")
+    price_value = trade.get(price_column)
+    if pd.isna(time_value) or pd.isna(price_value):
+        return
+    direction = trade.get("Direction", "")
+    marker_symbol = "triangle-up" if direction == "Long" else "triangle-down"
+    marker_color = "#16a34a" if direction == "Long" else "#dc2626"
+    if not is_entry:
+        marker_symbol = "x"
+        marker_color = "#2563eb"
+    fig.add_trace(
+        go.Scatter(
+            x=[time_value],
+            y=[price_value],
+            mode="markers",
+            name="Entry" if is_entry else "Exit",
+            marker=dict(symbol=marker_symbol, color=marker_color, size=13),
+            text=[_selected_trade_hover_text(trade)],
+            hovertemplate="%{text}<extra></extra>",
+        ),
+        row=1,
+        col=1,
+    )
+
+
+def _add_selected_trade_line(fig: go.Figure, trade: pd.Series) -> None:
+    entry_time = pd.to_datetime(trade.get("EntryTime"), errors="coerce")
+    exit_time = pd.to_datetime(trade.get("ExitTime"), errors="coerce")
+    if pd.isna(entry_time) or pd.isna(exit_time):
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=[entry_time, exit_time],
+            y=[trade.get("EntryPrice"), trade.get("ExitPrice")],
+            mode="lines",
+            line=dict(color="#64748b", width=2, dash="dot"),
+            name="Entry-Exit",
+            hoverinfo="skip",
+        ),
+        row=1,
+        col=1,
+    )
+
+
+def _add_sl_tp_lines(
+    fig: go.Figure,
+    trade: pd.Series,
+    risk_settings: dict[str, Any],
+) -> None:
+    entry_price = trade.get("EntryPrice")
+    direction = trade.get("Direction")
+    stop_loss_points = risk_settings.get("stop_loss_points")
+    take_profit_points = risk_settings.get("take_profit_points")
+    if entry_price is None or direction not in {"Long", "Short"}:
+        return
+    if stop_loss_points is not None:
+        sl = entry_price - stop_loss_points if direction == "Long" else entry_price + stop_loss_points
+        fig.add_hline(y=sl, line_color="#dc2626", line_dash="dash", row=1, col=1, annotation_text="SL")
+    if take_profit_points is not None:
+        tp = entry_price + take_profit_points if direction == "Long" else entry_price - take_profit_points
+        fig.add_hline(y=tp, line_color="#16a34a", line_dash="dash", row=1, col=1, annotation_text="TP")
+
+
+def _selected_trade_hover_text(trade: pd.Series) -> str:
+    return (
+        f"TradeID: {trade.get('TradeID')}<br>"
+        f"Direction: {trade.get('Direction')}<br>"
+        f"EntryTime: {trade.get('EntryTime')}<br>"
+        f"ExitTime: {trade.get('ExitTime')}<br>"
+        f"EntryPrice: {trade.get('EntryPrice')}<br>"
+        f"ExitPrice: {trade.get('ExitPrice')}<br>"
+        f"NetPnL: {format_currency_full(trade.get('NetPnL'))}<br>"
+        f"ExitReason: {trade.get('ExitReason')}"
+    )
+
+
+def build_backtest_price_figure(
+    ohlc: pd.DataFrame,
+    trades: pd.DataFrame,
+    show_exit_markers: bool = True,
+    show_entry_exit_lines: bool = True,
+) -> go.Figure:
+    fig = go.Figure(
+        data=[
+            go.Candlestick(
+                x=ohlc["DateTime"],
+                open=ohlc["Open"],
+                high=ohlc["High"],
+                low=ohlc["Low"],
+                close=ohlc["Close"],
+                name="OHLC",
+            )
+        ]
+    )
+
+    if not trades.empty:
+        direction = trades["Direction"] if "Direction" in trades.columns else pd.Series("", index=trades.index)
+        long_entries = trades[direction == "Long"]
+        short_entries = trades[direction == "Short"]
+        _add_trade_marker_trace(fig, long_entries, "EntryTime", "EntryPrice", "Long Entry", "triangle-up", "#16a34a")
+        _add_trade_marker_trace(fig, short_entries, "EntryTime", "EntryPrice", "Short Entry", "triangle-down", "#dc2626")
+        if show_exit_markers:
+            _add_trade_marker_trace(fig, trades, "ExitTime", "ExitPrice", "Exit", "x", "#2563eb")
+        if show_entry_exit_lines:
+            for _, trade in trades.iterrows():
+                if pd.isna(trade.get("EntryTime")) or pd.isna(trade.get("ExitTime")):
+                    continue
+                fig.add_trace(
+                    go.Scatter(
+                        x=[trade.get("EntryTime"), trade.get("ExitTime")],
+                        y=[trade.get("EntryPrice"), trade.get("ExitPrice")],
+                        mode="lines",
+                        line=dict(color="#64748b", width=1, dash="dot"),
+                        showlegend=False,
+                        hoverinfo="skip",
+                    )
+                )
+
+    fig.update_layout(
+        title="Backtest Entries and Exits",
+        xaxis_title="Time",
+        yaxis_title="Price",
+        xaxis_rangeslider_visible=False,
+        height=650,
+        margin=dict(l=20, r=20, t=45, b=20),
+    )
+    return fig
+
+
+def _add_trade_marker_trace(
+    fig: go.Figure,
+    trades: pd.DataFrame,
+    time_column: str,
+    price_column: str,
+    name: str,
+    symbol: str,
+    color: str,
+) -> None:
+    if trades.empty or time_column not in trades.columns or price_column not in trades.columns:
+        return
+    customdata = trades[
+        [column for column in ["TradeID", "Direction", "NetPnL", "ExitReason"] if column in trades.columns]
+    ].to_numpy()
+    fig.add_trace(
+        go.Scatter(
+            x=trades[time_column],
+            y=trades[price_column],
+            mode="markers",
+            name=name,
+            marker=dict(symbol=symbol, color=color, size=10),
+            customdata=customdata,
+            hovertemplate=_trade_hover_template(customdata.shape[1]),
+        )
+    )
+
+
+def _trade_hover_template(custom_columns: int) -> str:
+    labels = ["TradeID", "Direction", "NetPnL", "ExitReason"]
+    lines = ["%{x}", "Price: %{y:,.2f}"]
+    for index in range(custom_columns):
+        label = labels[index]
+        value_format = "$%{customdata[" + str(index) + "]:,.2f}" if label == "NetPnL" else "%{customdata[" + str(index) + "]}"
+        lines.append(f"{label}: {value_format}")
+    return "<br>".join(lines) + "<extra></extra>"
+
+
+def prepare_trade_pnl_chart_data(trades_df: pd.DataFrame) -> pd.DataFrame:
+    data = trades_df.copy().reset_index(drop=True)
+    data["NetPnL"] = pd.to_numeric(data.get("NetPnL", 0), errors="coerce").fillna(0.0)
+    if "TradeID" in data.columns:
+        data["TradeIndex"] = data["TradeID"]
+    else:
+        data["TradeIndex"] = range(1, len(data) + 1)
+    data["CumulativeNetPnL"] = data["NetPnL"].cumsum()
+    return data[["TradeIndex", "NetPnL", "CumulativeNetPnL"]]
+
+
+def prepare_ohlc_for_chart(ohlc_df: pd.DataFrame) -> pd.DataFrame:
+    required_columns = {"DateTime", "Open", "High", "Low", "Close"}
+    if ohlc_df.empty or not required_columns.issubset(ohlc_df.columns):
+        return pd.DataFrame(columns=["DateTime", "Open", "High", "Low", "Close"])
+
+    data = ohlc_df.copy()
+    data["DateTime"] = pd.to_datetime(data["DateTime"], errors="coerce")
+    for column in ["Open", "High", "Low", "Close"]:
+        data[column] = pd.to_numeric(data[column], errors="coerce")
+    return (
+        data.dropna(subset=["DateTime", "Open", "High", "Low", "Close"])
+        .sort_values("DateTime")
+        .reset_index(drop=True)
+    )
+
+
+def filter_trades_for_chart(
+    trades_df: pd.DataFrame,
+    start_dt: Any,
+    end_dt: Any,
+    direction_filter: str = "All",
+    max_trades: int = 100,
+) -> pd.DataFrame:
+    if trades_df.empty:
+        return pd.DataFrame()
+
+    trades = trades_df.copy()
+    for column in ["EntryTime", "ExitTime"]:
+        if column in trades.columns:
+            trades[column] = pd.to_datetime(trades[column], errors="coerce")
+
+    if "EntryTime" not in trades.columns and "ExitTime" not in trades.columns:
+        return pd.DataFrame()
+
+    entry_time = trades.get("EntryTime", pd.Series(pd.NaT, index=trades.index))
+    exit_time = trades.get("ExitTime", pd.Series(pd.NaT, index=trades.index))
+    in_range = (
+        entry_time.between(start_dt, end_dt, inclusive="both")
+        | exit_time.between(start_dt, end_dt, inclusive="both")
+    )
+    trades = trades[in_range]
+
+    if direction_filter == "Long only" and "Direction" in trades.columns:
+        trades = trades[trades["Direction"] == "Long"]
+    elif direction_filter == "Short only" and "Direction" in trades.columns:
+        trades = trades[trades["Direction"] == "Short"]
+
+    for column in ["EntryPrice", "ExitPrice", "NetPnL"]:
+        if column in trades.columns:
+            trades[column] = pd.to_numeric(trades[column], errors="coerce")
+
+    sort_column = "EntryTime" if "EntryTime" in trades.columns else "ExitTime"
+    return trades.sort_values(sort_column).head(max_trades).reset_index(drop=True)
 
 
 def render_diagnostic_warnings(

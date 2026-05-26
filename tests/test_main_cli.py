@@ -18,7 +18,9 @@ def test_build_strategy_from_args_builds_stochastic_strategy():
     strategy = build_strategy_from_args(_args(strategy="stochastic"))
 
     assert isinstance(strategy, StochasticLevelStrategy)
-    assert strategy.k_period == 14
+    assert strategy.period_k == 14
+    assert strategy.period_d == 3
+    assert strategy.smooth == 3
     assert strategy.oversold_level == 20
 
 
@@ -134,6 +136,7 @@ def _args(**overrides) -> Namespace:
         "random_seed": 42,
         "stoch_k_period": 14,
         "stoch_d_period": 3,
+        "stoch_smooth": 3,
         "stoch_oversold": 20,
         "stoch_overbought": 80,
         "stoch_signal_mode": "cross",
