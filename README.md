@@ -274,6 +274,22 @@ Run an OHLC strategy with bankroll tracking:
 PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/MNQ_1m.csv --strategy stochastic --preset tradeify_growth_50k --symbol MNQ --point-value 2 --bankroll 3000
 ```
 
+Run MNQ with realistic trade costs:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/MNQ_1m.csv --strategy stochastic --preset tradeify_growth_50k --symbol MNQ --point-value 2 --contracts 1 --commission-per-side 1.24 --slippage-points 0.25 --spread-points 0.25
+```
+
+Run stochastic optimization with costs:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --optimize-strategy stochastic --market-data data/market_data/MNQ_1m.csv --preset tradeify_growth_50k --optimization-grid fast --optimization-workers 4 --symbol MNQ --point-value 2 --contracts 1 --commission-per-side 1.24 --slippage-points 0.25 --spread-points 0.25
+```
+
+For futures, MNQ point value is typically `2` and NQ point value is typically
+`20`. Commissions, slippage, and spread can materially change near-break-even
+strategies, so include realistic costs before trusting optimization rankings.
+
 Compare presets with bankroll tracking:
 
 ```bash

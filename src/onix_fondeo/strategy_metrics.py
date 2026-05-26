@@ -17,6 +17,14 @@ def calculate_strategy_metrics(trades: pd.DataFrame) -> dict[str, Any]:
     flat_trades = net_pnl[net_pnl == 0]
     gross_profit = float(winning_trades.sum())
     gross_loss = float(losing_trades.sum())
+    total_commission = _sum_optional_column(trades, "Commission")
+    total_slippage_cost = _sum_optional_column(trades, "SlippageCost")
+    total_spread_cost = _sum_optional_column(trades, "SpreadCost")
+    total_cost = (
+        _sum_optional_column(trades, "TotalCost")
+        if "TotalCost" in trades.columns
+        else total_commission + total_slippage_cost + total_spread_cost
+    )
 
     return {
         "total_trades": int(len(trades)),
@@ -41,6 +49,10 @@ def calculate_strategy_metrics(trades: pd.DataFrame) -> dict[str, Any]:
         "end_of_data_exits": _count_exit_reason(trades, "END_OF_DATA"),
         "force_close_exits": _count_exit_reason(trades, "FORCE_CLOSE"),
         "average_holding_minutes": _average_holding_minutes(trades),
+        "total_commission": total_commission,
+        "total_slippage_cost": total_slippage_cost,
+        "total_spread_cost": total_spread_cost,
+        "total_cost": total_cost,
     }
 
 
@@ -82,6 +94,10 @@ def _empty_metrics() -> dict[str, Any]:
         "end_of_data_exits": 0,
         "force_close_exits": 0,
         "average_holding_minutes": 0.0,
+        "total_commission": 0.0,
+        "total_slippage_cost": 0.0,
+        "total_spread_cost": 0.0,
+        "total_cost": 0.0,
     }
 
 
@@ -136,3 +152,9 @@ def _average_holding_minutes(trades: pd.DataFrame) -> float:
     if holding_minutes.empty:
         return 0.0
     return float(holding_minutes.mean())
+
+
+def _sum_optional_column(trades: pd.DataFrame, column: str) -> float:
+    if column not in trades.columns:
+        return 0.0
+    return float(pd.to_numeric(trades[column], errors="coerce").fillna(0.0).sum())

@@ -199,6 +199,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
     parser.add_argument(
+        "--contracts",
+        type=float,
+        help="Number of contracts. Overrides --quantity when provided.",
+    )
+    parser.add_argument(
         "--point-value",
         type=float,
         default=20.0,
@@ -227,6 +232,18 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Commission per side per contract.",
+    )
+    parser.add_argument(
+        "--slippage-points",
+        type=float,
+        default=0.0,
+        help="Slippage in points per side.",
+    )
+    parser.add_argument(
+        "--spread-points",
+        type=float,
+        default=0.0,
+        help="Spread cost approximation in points.",
     )
     parser.add_argument(
         "--same-bar-exit-policy",
@@ -340,8 +357,11 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
         base_args={
             "symbol": args.symbol,
             "quantity": args.quantity,
+            "contracts": args.contracts,
             "point_value": args.point_value,
             "commission_per_side": args.commission_per_side,
+            "slippage_points": args.slippage_points,
+            "spread_points": args.spread_points,
             "max_holding_minutes": args.max_holding_minutes,
             "same_bar_exit_policy": args.same_bar_exit_policy,
             "force_close_time": args.force_close_time,
@@ -441,11 +461,14 @@ def load_or_generate_trades(args: argparse.Namespace):
         strategy=strategy,
         symbol=args.symbol,
         quantity=args.quantity,
+        contracts=args.contracts,
         point_value=args.point_value,
         stop_loss_points=args.stop_loss_points,
         take_profit_points=args.take_profit_points,
         max_holding_minutes=args.max_holding_minutes,
         commission_per_side=args.commission_per_side,
+        slippage_points=args.slippage_points,
+        spread_points=args.spread_points,
         same_bar_exit_policy=args.same_bar_exit_policy,
         force_close_time=args.force_close_time,
     )

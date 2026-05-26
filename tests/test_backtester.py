@@ -29,7 +29,15 @@ def test_backtester_returns_required_trade_columns():
     )
 
     assert list(trades.columns) == TRADE_COLUMNS
-    assert {"TradeID", "EntryTime", "ExitTime", "NetPnL"}.issubset(trades.columns)
+    assert {
+        "TradeID",
+        "EntryTime",
+        "ExitTime",
+        "NetPnL",
+        "SlippageCost",
+        "SpreadCost",
+        "TotalCost",
+    }.issubset(trades.columns)
 
 
 def test_backtester_handles_long_take_profit():
@@ -127,6 +135,72 @@ def test_backtester_stop_loss_takes_priority_on_force_close_bar():
 
     assert trade["ExitReason"] == "SL"
     assert trade["ExitPrice"] == 95
+
+
+def test_backtester_net_pnl_includes_commission():
+    trades = backtest_strategy(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=5,
+        take_profit_points=5,
+        commission_per_side=2,
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["GrossPnL"] == 100
+    assert trade["Commission"] == 4
+    assert trade["NetPnL"] == 96
+
+
+def test_backtester_net_pnl_includes_slippage_cost():
+    trades = backtest_strategy(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=5,
+        take_profit_points=5,
+        slippage_points=0.25,
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["SlippageCost"] == 10
+    assert trade["NetPnL"] == 90
+
+
+def test_backtester_net_pnl_includes_spread_cost():
+    trades = backtest_strategy(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        point_value=20,
+        stop_loss_points=5,
+        take_profit_points=5,
+        spread_points=0.25,
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["SpreadCost"] == 5
+    assert trade["NetPnL"] == 95
+
+
+def test_backtester_contracts_override_quantity():
+    trades = backtest_strategy(
+        _ohlc_for_long_tp(),
+        FixedSignalStrategy("Long"),
+        quantity=3,
+        contracts=2,
+        point_value=20,
+        stop_loss_points=5,
+        take_profit_points=5,
+    )
+
+    trade = trades.iloc[0]
+
+    assert trade["Quantity"] == 2
+    assert trade["GrossPnL"] == 200
 
 
 def _base_ohlc(high_second_bar: float, low_second_bar: float) -> pd.DataFrame:

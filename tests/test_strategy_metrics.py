@@ -86,6 +86,25 @@ def test_strategy_metrics_count_force_close_exits():
     assert metrics["force_close_exits"] == 1
 
 
+def test_strategy_metrics_sum_trade_cost_columns():
+    trades = pd.DataFrame(
+        {
+            "NetPnL": [90, -30],
+            "Commission": [4, 4],
+            "SlippageCost": [10, 10],
+            "SpreadCost": [5, 5],
+            "TotalCost": [19, 19],
+        }
+    )
+
+    metrics = calculate_strategy_metrics(trades)
+
+    assert metrics["total_commission"] == 8
+    assert metrics["total_slippage_cost"] == 20
+    assert metrics["total_spread_cost"] == 10
+    assert metrics["total_cost"] == 38
+
+
 def test_export_strategy_metrics_writes_json(tmp_path: Path):
     metrics = calculate_strategy_metrics(pd.DataFrame({"NetPnL": [100]}))
 

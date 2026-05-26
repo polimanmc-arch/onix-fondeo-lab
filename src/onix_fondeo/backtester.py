@@ -16,6 +16,9 @@ TRADE_COLUMNS = [
     "ExitPrice",
     "GrossPnL",
     "Commission",
+    "SlippageCost",
+    "SpreadCost",
+    "TotalCost",
     "NetPnL",
     "ExitReason",
     "StrategyName",
@@ -27,11 +30,14 @@ def backtest_strategy(
     strategy: Any,
     symbol: str = "NQ",
     quantity: float = 1,
+    contracts: float | None = None,
     point_value: float = 20.0,
     stop_loss_points: float = 30.0,
     take_profit_points: float = 45.0,
     max_holding_minutes: int = 60,
     commission_per_side: float = 0.0,
+    slippage_points: float = 0.0,
+    spread_points: float = 0.0,
     same_bar_exit_policy: str = "conservative",
     force_close_time: str | None = None,
 ) -> pd.DataFrame:
@@ -40,6 +46,7 @@ def backtest_strategy(
 
     trades = []
     next_available_index = 0
+    trade_quantity = contracts if contracts is not None else quantity
 
     for signal in signals:
         signal_index = _find_signal_index(data, signal.signal_time)
@@ -56,12 +63,14 @@ def backtest_strategy(
             entry_index=entry_index,
             trade_id=len(trades) + 1,
             symbol=symbol,
-            quantity=quantity,
+            quantity=trade_quantity,
             point_value=point_value,
             stop_loss_points=stop_loss_points,
             take_profit_points=take_profit_points,
             max_holding_minutes=max_holding_minutes,
             commission_per_side=commission_per_side,
+            slippage_points=slippage_points,
+            spread_points=spread_points,
             same_bar_exit_policy=same_bar_exit_policy,
             force_close_time=force_close_time,
             strategy_name=getattr(strategy, "name", strategy.__class__.__name__),
@@ -91,6 +100,8 @@ def _simulate_trade(
     take_profit_points: float,
     max_holding_minutes: int,
     commission_per_side: float,
+    slippage_points: float,
+    spread_points: float,
     same_bar_exit_policy: str,
     force_close_time: str | None,
     strategy_name: str,
@@ -158,7 +169,10 @@ def _simulate_trade(
         quantity=quantity,
     )
     commission = commission_per_side * 2 * quantity
-    net_pnl = gross_pnl - commission
+    slippage_cost = slippage_points * point_value * quantity * 2
+    spread_cost = spread_points * point_value * quantity
+    total_cost = commission + slippage_cost + spread_cost
+    net_pnl = gross_pnl - total_cost
 
     return {
         "exit_index": exit_index,
@@ -173,6 +187,9 @@ def _simulate_trade(
             "ExitPrice": exit_price,
             "GrossPnL": gross_pnl,
             "Commission": commission,
+            "SlippageCost": slippage_cost,
+            "SpreadCost": spread_cost,
+            "TotalCost": total_cost,
             "NetPnL": net_pnl,
             "ExitReason": exit_reason,
             "StrategyName": strategy_name,

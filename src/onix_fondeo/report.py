@@ -1678,6 +1678,14 @@ def _strategy_summary_section_html(
         ("Average Trade", strategy_metrics.get("average_trade", 0.0), "money"),
         ("Best Trade", strategy_metrics.get("best_trade", 0.0), "money"),
         ("Worst Trade", strategy_metrics.get("worst_trade", 0.0), "money"),
+        ("Total Cost", strategy_metrics.get("total_cost", 0.0), "money"),
+        ("Total Commission", strategy_metrics.get("total_commission", 0.0), "money"),
+        (
+            "Slippage Cost",
+            strategy_metrics.get("total_slippage_cost", 0.0),
+            "money",
+        ),
+        ("Spread Cost", strategy_metrics.get("total_spread_cost", 0.0), "money"),
         (
             "Average Holding Minutes",
             strategy_metrics.get("average_holding_minutes", 0.0),
