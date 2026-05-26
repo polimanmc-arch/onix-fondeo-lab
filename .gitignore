@@ -4,3 +4,11 @@ __pycache__/
 data/output/
 .DS_Store
 .vscode/
+
+# Real market data files
+data/market_data/*.csv
+data/market_data/*.txt
+
+# Keep sample files tracked
+!data/market_data/sample_NQ_1m.csv
+!data/market_data/.gitkeep

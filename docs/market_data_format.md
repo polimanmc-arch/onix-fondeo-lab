@@ -60,6 +60,24 @@ The loader normalizes common vendor and NinjaTrader-style column names:
 Column-name whitespace is stripped before alias matching. Unknown columns are
 preserved.
 
+## NinjaTrader Raw Historical Exports
+
+NinjaTrader historical data may also be exported as semicolon-separated raw rows
+without a header:
+
+```text
+20260312 040400;24945.25;24949.25;24945.25;24949.25;7
+```
+
+That raw field order is:
+
+```text
+YYYYMMDD HHMMSS;Open;High;Low;Close;Volume
+```
+
+Use `convert_ninjatrader_export_to_csv` from `onix_fondeo.market_data` to
+convert raw files into the standard CSV format before running the CLI.
+
 ## DateTime Format
 
 Use this format:
