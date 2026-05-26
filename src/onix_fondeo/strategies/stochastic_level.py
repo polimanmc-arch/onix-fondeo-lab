@@ -13,8 +13,9 @@ class StochasticLevelStrategy(BaseStrategy):
 
     def __init__(
         self,
-        k_period: int = 14,
-        d_period: int = 3,
+        period_d: int = 7,
+        period_k: int = 14,
+        smooth: int = 3,
         oversold_level: float = 20,
         overbought_level: float = 80,
         allow_long: bool = True,
@@ -25,12 +26,22 @@ class StochasticLevelStrategy(BaseStrategy):
         use_d_confirmation: bool = False,
         min_k_d_gap: float = 0.0,
         cooldown_bars: int = 0,
+        k_period: int | None = None,
+        d_period: int | None = None,
     ) -> None:
         if signal_mode not in {"cross", "zone"}:
             raise ValueError("signal_mode must be 'cross' or 'zone'.")
 
-        self.k_period = k_period
-        self.d_period = d_period
+        if k_period is not None:
+            period_k = k_period
+        if d_period is not None:
+            period_d = d_period
+
+        self.period_d = period_d
+        self.period_k = period_k
+        self.smooth = smooth
+        self.k_period = period_k
+        self.d_period = period_d
         self.oversold_level = oversold_level
         self.overbought_level = overbought_level
         self.allow_long = allow_long
@@ -41,15 +52,15 @@ class StochasticLevelStrategy(BaseStrategy):
         self.use_d_confirmation = use_d_confirmation
         self.min_k_d_gap = min_k_d_gap
         self.cooldown_bars = cooldown_bars
+        self.name = (
+            "StochasticLevel("
+            f"periodK={self.period_k}, periodD={self.period_d}, smooth={self.smooth}"
+            ")"
+        )
 
     def generate_signals(self, ohlc: pd.DataFrame) -> list[StrategySignal]:
         data = ohlc.copy()
-        lowest_low = data["Low"].rolling(self.k_period).min()
-        highest_high = data["High"].rolling(self.k_period).max()
-        price_range = highest_high - lowest_low
-        data["PercentK"] = 100 * (data["Close"] - lowest_low) / price_range
-        data.loc[price_range == 0, "PercentK"] = 0.0
-        data["PercentD"] = data["PercentK"].rolling(self.d_period).mean()
+        data["FastK"], data["PercentK"], data["PercentD"] = self.calculate_stochastics(data)
 
         signals = []
         cooldown_remaining = 0
@@ -78,6 +89,36 @@ class StochasticLevelStrategy(BaseStrategy):
                 cooldown_remaining = self.cooldown_bars
 
         return signals
+
+    def calculate_stochastics(
+        self,
+        ohlc: pd.DataFrame,
+    ) -> tuple[pd.Series, pd.Series, pd.Series]:
+        lowest_low = ohlc["Low"].rolling(self.period_k).min()
+        highest_high = ohlc["High"].rolling(self.period_k).max()
+        denominator = highest_high - lowest_low
+        fast_k = pd.Series(index=ohlc.index, dtype=float)
+        previous_fast_k: float | None = None
+
+        for index in ohlc.index:
+            den = denominator.loc[index]
+            low = lowest_low.loc[index]
+            close = ohlc.loc[index, "Close"]
+
+            if pd.isna(den) or pd.isna(low):
+                continue
+            if den == 0:
+                value = 50.0 if previous_fast_k is None else previous_fast_k
+            else:
+                value = 100 * (close - low) / den
+                value = max(0.0, min(100.0, value))
+
+            fast_k.loc[index] = value
+            previous_fast_k = value
+
+        percent_k = fast_k.rolling(self.smooth).mean()
+        percent_d = percent_k.rolling(self.period_d).mean()
+        return fast_k, percent_k, percent_d
 
     def _signal_for_bar(
         self,

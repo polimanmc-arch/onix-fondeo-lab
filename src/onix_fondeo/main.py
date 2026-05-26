@@ -334,13 +334,19 @@ def parse_args() -> argparse.Namespace:
         "--stoch-k-period",
         type=int,
         default=14,
-        help="Stochastic %%K period.",
+        help="Stochastic PeriodK, matching NinjaTrader PeriodK.",
     )
     parser.add_argument(
         "--stoch-d-period",
         type=int,
+        default=7,
+        help="Stochastic PeriodD, matching NinjaTrader PeriodD.",
+    )
+    parser.add_argument(
+        "--stoch-smooth",
+        type=int,
         default=3,
-        help="Stochastic %%D period.",
+        help="Stochastic Smooth, matching NinjaTrader Smooth.",
     )
     parser.add_argument(
         "--stoch-oversold",
@@ -499,8 +505,9 @@ def build_strategy_from_args(args: argparse.Namespace):
 
     if strategy_name == "stochastic":
         return StochasticLevelStrategy(
-            k_period=args.stoch_k_period,
-            d_period=args.stoch_d_period,
+            period_k=args.stoch_k_period,
+            period_d=args.stoch_d_period,
+            smooth=args.stoch_smooth,
             oversold_level=args.stoch_oversold,
             overbought_level=args.stoch_overbought,
             start_time=args.strategy_start_time,

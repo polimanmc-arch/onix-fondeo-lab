@@ -98,7 +98,10 @@ Current strategies:
 - Random Entry Strategy: a reproducible benchmark strategy that creates random
   long/short entries.
 - Stochastic Level Strategy: a simple logic-based strategy using stochastic
-  oscillator level crosses.
+  oscillator level crosses. Its calculation matches NinjaTrader's
+  Stochastics indicator inputs: `PeriodK`, `PeriodD`, and `Smooth`.
+  Internally, `fastK` is calculated from the rolling high/low range,
+  `K = SMA(fastK, Smooth)`, and `D = SMA(K, PeriodD)`.
 
 Generated trades use the same key columns as the existing trade CSV workflow:
 

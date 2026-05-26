@@ -23,7 +23,8 @@ def build_stochastic_parameter_grid(grid_name: str = "fast") -> list[dict[str, A
     grid_values_by_name = {
         "fast": {
             "stoch_k_period": [14],
-            "stoch_d_period": [3],
+            "stoch_d_period": [7],
+            "stoch_smooth": [3],
             "oversold": [20, 30],
             "overbought": [70, 80],
             "signal_mode": ["cross"],
@@ -35,7 +36,8 @@ def build_stochastic_parameter_grid(grid_name: str = "fast") -> list[dict[str, A
         },
         "default": {
             "stoch_k_period": [7, 14],
-            "stoch_d_period": [3],
+            "stoch_d_period": [7],
+            "stoch_smooth": [3],
             "oversold": [20, 30],
             "overbought": [70, 80],
             "signal_mode": ["cross", "zone"],
@@ -47,7 +49,8 @@ def build_stochastic_parameter_grid(grid_name: str = "fast") -> list[dict[str, A
         },
         "full": {
             "stoch_k_period": [7, 14, 21],
-            "stoch_d_period": [3, 5],
+            "stoch_d_period": [5, 7],
+            "stoch_smooth": [3],
             "oversold": [15, 20, 30],
             "overbought": [70, 80, 85],
             "signal_mode": ["cross", "zone"],
@@ -151,8 +154,9 @@ def run_single_stochastic_optimization_job(job: dict) -> list[dict[str, Any]]:
     base_args = job.get("base_args") or {}
 
     strategy = StochasticLevelStrategy(
-        k_period=params["stoch_k_period"],
-        d_period=params["stoch_d_period"],
+        period_k=params["stoch_k_period"],
+        period_d=params["stoch_d_period"],
+        smooth=params.get("stoch_smooth", 3),
         oversold_level=params["oversold"],
         overbought_level=params["overbought"],
         signal_mode=params["signal_mode"],
