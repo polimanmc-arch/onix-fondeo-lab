@@ -362,6 +362,27 @@ This Monte Carlo engine samples observed account-level outcomes with
 replacement. It is useful for estimating capital needs and ruin risk, but it is
 not a guarantee of future performance.
 
+## Streak Analysis and Z-score
+
+Streak analysis helps understand bad streaks, payout droughts, and clustering in
+account outcomes. It complements bankroll tracking and Monte Carlo risk of ruin
+by showing sequence behavior directly.
+
+Example:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --preset tradeify_growth_50k --bankroll 3000 --monte-carlo-runs 1000
+```
+
+The output includes:
+
+- `data/output/streak_analysis.json`
+- a Streak Analysis section in `data/output/report.html`
+
+The Z-score is a runs-test style diagnostic. It can suggest unusual clustering
+or alternation in binary outcome sequences, but it is not a guarantee of future
+performance.
+
 Compare presets with bankroll tracking:
 
 ```bash

@@ -164,6 +164,30 @@ def test_generate_html_report_includes_risk_of_ruin_when_provided(tmp_path):
     assert "Required Bankroll Grid" in html
 
 
+def test_generate_html_report_includes_streak_analysis_when_provided(tmp_path):
+    report_path = generate_html_report(
+        _results(),
+        _metrics(),
+        output_dir=tmp_path,
+        streak_analysis={
+            "max_consecutive_no_payout_accounts": 2,
+            "max_consecutive_payout_accounts": 1,
+            "max_consecutive_negative_accounts": 2,
+            "max_consecutive_positive_accounts": 1,
+            "max_consecutive_failed_evaluations": 1,
+            "max_consecutive_passed_evaluations": 1,
+            "z_score_funded_payout": _z_score_row(),
+            "z_score_net_positive": _z_score_row(),
+            "z_score_passed_evaluation": _z_score_row(),
+        },
+    )
+
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "Streak Analysis" in html
+    assert "Funded Payout Sequence" in html
+
+
 def test_export_optimization_results_adds_ranking_sections(tmp_path):
     files = export_optimization_results(_optimization_rows(), output_dir=tmp_path)
 
@@ -289,3 +313,16 @@ def _section_between(text: str, start: str, end: str) -> str:
     start_index = text.index(start)
     end_index = text.index(end, start_index)
     return text[start_index:end_index]
+
+
+def _z_score_row():
+    return {
+        "n": 3,
+        "ones": 1,
+        "zeros": 2,
+        "runs": 2,
+        "expected_runs": 2.3333,
+        "variance": 0.2222,
+        "z_score": -0.7071,
+        "note": None,
+    }

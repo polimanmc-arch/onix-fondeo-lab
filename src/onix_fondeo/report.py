@@ -183,6 +183,7 @@ def export_results(
     bankroll_result: dict[str, Any] | None = None,
     risk_of_ruin_result: dict[str, Any] | None = None,
     required_bankroll_result: dict[str, Any] | None = None,
+    streak_analysis: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -227,6 +228,7 @@ def export_results(
             bankroll_result=bankroll_result,
             risk_of_ruin_result=risk_of_ruin_result,
             required_bankroll_result=required_bankroll_result,
+            streak_analysis=streak_analysis,
         )
 
     return file_paths
@@ -1081,6 +1083,7 @@ def generate_html_report(
     bankroll_result: dict[str, Any] | None = None,
     risk_of_ruin_result: dict[str, Any] | None = None,
     required_bankroll_result: dict[str, Any] | None = None,
+    streak_analysis: dict[str, Any] | None = None,
 ) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -1365,6 +1368,7 @@ def generate_html_report(
     {_strategy_summary_section_html(strategy_metrics)}
     {_bankroll_summary_section_html(bankroll_result)}
     {_risk_of_ruin_section_html(risk_of_ruin_result, required_bankroll_result)}
+    {_streak_analysis_section_html(streak_analysis)}
 
     <section>
       <h2>Business Metrics</h2>
@@ -1733,6 +1737,62 @@ def _required_bankroll_table_html(required_bankroll_result: dict[str, Any] | Non
         "</tr></thead>"
         f"<tbody>{''.join(table_rows)}</tbody></table>"
     )
+
+
+def _streak_analysis_section_html(streak_analysis: dict[str, Any] | None) -> str:
+    if streak_analysis is None:
+        return ""
+
+    return f"""
+    <section>
+      <h2>Streak Analysis</h2>
+      <div class="cards">
+        {_bankroll_card_html("Max Consecutive No-Payout Accounts", str(streak_analysis["max_consecutive_no_payout_accounts"]))}
+        {_bankroll_card_html("Max Consecutive Payout Accounts", str(streak_analysis["max_consecutive_payout_accounts"]))}
+        {_bankroll_card_html("Max Consecutive Negative Accounts", str(streak_analysis["max_consecutive_negative_accounts"]))}
+        {_bankroll_card_html("Max Consecutive Positive Accounts", str(streak_analysis["max_consecutive_positive_accounts"]))}
+        {_bankroll_card_html("Max Consecutive Failed Evaluations", str(streak_analysis["max_consecutive_failed_evaluations"]))}
+        {_bankroll_card_html("Max Consecutive Passed Evaluations", str(streak_analysis["max_consecutive_passed_evaluations"]))}
+      </div>
+      <p class="chart-note">Z-score is a runs-test style diagnostic. It helps detect clustering or alternation in binary outcome sequences. It should be interpreted as a diagnostic, not a guarantee.</p>
+      {_streak_z_score_table_html(streak_analysis)}
+    </section>
+"""
+
+
+def _streak_z_score_table_html(streak_analysis: dict[str, Any]) -> str:
+    rows = [
+        ("Funded Payout Sequence", streak_analysis["z_score_funded_payout"]),
+        ("Net Positive Sequence", streak_analysis["z_score_net_positive"]),
+        ("Passed Evaluation Sequence", streak_analysis["z_score_passed_evaluation"]),
+    ]
+    table_rows = []
+    for label, data in rows:
+        table_rows.append(
+            "<tr>"
+            f"<td>{escape(label)}</td>"
+            f"<td>{escape(str(data.get('n')))}</td>"
+            f"<td>{escape(str(data.get('ones')))}</td>"
+            f"<td>{escape(str(data.get('zeros')))}</td>"
+            f"<td>{escape(str(data.get('runs')))}</td>"
+            f"<td>{escape(_format_optional_decimal(data.get('expected_runs')))}</td>"
+            f"<td>{escape(_format_optional_decimal(data.get('z_score')))}</td>"
+            f"<td>{escape(str(data.get('note') or ''))}</td>"
+            "</tr>"
+        )
+    return (
+        "<table><thead><tr>"
+        "<th>Sequence</th><th>n</th><th>ones</th><th>zeros</th><th>runs</th>"
+        "<th>expected_runs</th><th>z_score</th><th>note</th>"
+        "</tr></thead>"
+        f"<tbody>{''.join(table_rows)}</tbody></table>"
+    )
+
+
+def _format_optional_decimal(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.4f}"
 
 
 def _strategy_summary_section_html(

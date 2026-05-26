@@ -33,6 +33,7 @@ from onix_fondeo.strategy_metrics import (
     calculate_strategy_metrics,
     export_strategy_metrics,
 )
+from onix_fondeo.streaks import calculate_streak_analysis, export_streak_analysis
 from onix_fondeo.strategies.random_entry import RandomEntryStrategy
 from onix_fondeo.strategies.stochastic_level import StochasticLevelStrategy
 
@@ -63,6 +64,8 @@ def main():
     results = simulate_funding(trades, config)
     metrics = calculate_business_metrics(results, config)
     bankroll_result = _calculate_bankroll_result(args.bankroll, results, config)
+    streak_analysis = calculate_streak_analysis(results)
+    streak_analysis_path = export_streak_analysis(streak_analysis)
     risk_result, required_bankroll_result, risk_files = _run_risk_of_ruin_if_requested(
         args,
         results,
@@ -84,7 +87,9 @@ def main():
         bankroll_result=bankroll_result,
         risk_of_ruin_result=risk_result,
         required_bankroll_result=required_bankroll_result,
+        streak_analysis=streak_analysis,
     )
+    exported_files["streak_analysis"] = streak_analysis_path
     exported_files.update(risk_files)
 
     print("\nSimulation summary:")
