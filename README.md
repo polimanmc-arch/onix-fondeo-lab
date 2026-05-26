@@ -262,6 +262,29 @@ Compare Lucid Trading vs Tradeify:
 PYTHONPATH=src python -m onix_fondeo.main --compare lucid_trading_lucidflex_50k tradeify_growth_50k
 ```
 
+Run a single simulation with bankroll tracking:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --preset tradeify_growth_50k --bankroll 3000
+```
+
+Run an OHLC strategy with bankroll tracking:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --market-data data/market_data/MNQ_1m.csv --strategy stochastic --preset tradeify_growth_50k --symbol MNQ --point-value 2 --bankroll 3000
+```
+
+Compare presets with bankroll tracking:
+
+```bash
+PYTHONPATH=src python -m onix_fondeo.main --compare tradeify_growth_50k lucid_trading_lucidflex_50k --bankroll 3000
+```
+
+Bankroll tracking starts with the initial capital supplied by `--bankroll`.
+Evaluation costs reduce bankroll, and net payouts increase bankroll. Ruin means
+the bankroll went below zero at some point in the historical event path. This is
+historical/path-based bankroll tracking, not Monte Carlo simulation yet.
+
 After comparison, open:
 
 ```text

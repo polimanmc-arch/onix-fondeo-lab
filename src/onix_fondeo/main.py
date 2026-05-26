@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 
 from onix_fondeo.backtester import backtest_strategy
+from onix_fondeo.bankroll import calculate_bankroll_curve
 from onix_fondeo.loader import (
     config_from_preset,
     list_presets,
@@ -42,7 +43,7 @@ def main():
     trades, strategy_metrics = load_or_generate_trades(args)
 
     if args.compare:
-        run_comparison(args.compare, trades)
+        run_comparison(args.compare, trades, bankroll=args.bankroll)
         return
 
     config = load_config(args.preset)
@@ -65,6 +66,11 @@ def main():
         metrics=metrics,
         presets=presets,
         strategy_metrics=strategy_metrics,
+        bankroll_result=_calculate_bankroll_result(
+            args.bankroll,
+            results,
+            config,
+        ),
     )
 
     print("\nSimulation summary:")
@@ -184,6 +190,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=0,
         help="Minimum trades required for optimization report rankings.",
+    )
+    parser.add_argument(
+        "--bankroll",
+        type=float,
+        help="Initial business bankroll for path-based bankroll tracking.",
     )
     parser.add_argument("--symbol", default="NQ", help="Trading symbol.")
     parser.add_argument("--quantity", type=float, default=1, help="Trade quantity.")
@@ -334,6 +345,7 @@ def run_stochastic_optimization_mode(args: argparse.Namespace) -> None:
             "max_holding_minutes": args.max_holding_minutes,
             "same_bar_exit_policy": args.same_bar_exit_policy,
             "force_close_time": args.force_close_time,
+            "initial_bankroll": args.bankroll,
         },
         max_runs=args.max_optimization_runs,
         grid_name=args.optimization_grid,
@@ -468,7 +480,7 @@ def _format_metric(value: float) -> str:
     return f"{value:.2f}"
 
 
-def run_comparison(preset_ids: list[str], trades: object) -> None:
+def run_comparison(preset_ids: list[str], trades: object, bankroll: float | None = None) -> None:
     comparison_rows = []
     skipped_presets = []
 
@@ -494,7 +506,8 @@ def run_comparison(preset_ids: list[str], trades: object) -> None:
         config = config_from_preset(preset)
         results = simulate_funding(trades, config)
         metrics = calculate_business_metrics(results, config)
-        comparison_rows.append(_comparison_row(preset, metrics))
+        bankroll_result = _calculate_bankroll_result(bankroll, results, config)
+        comparison_rows.append(_comparison_row(preset, metrics, bankroll_result))
 
     if not comparison_rows:
         print("\nNo runnable presets available for comparison.")
@@ -527,9 +540,10 @@ def run_comparison(preset_ids: list[str], trades: object) -> None:
 def _comparison_row(
     preset: dict,
     metrics: dict,
+    bankroll_result: dict | None = None,
 ) -> dict:
     metadata = preset.get("metadata", {})
-    return {
+    row = {
         "preset_id": preset["preset_id"],
         "company": preset["company"],
         "plan": preset.get("plan"),
@@ -537,6 +551,46 @@ def _comparison_row(
         "account_size": preset.get("account_size"),
         "straight_to_funded": bool(metadata.get("straight_to_funded", False)),
         **metrics,
+    }
+    if bankroll_result is not None:
+        row.update(_bankroll_comparison_fields(bankroll_result))
+    return row
+
+
+def _calculate_bankroll_result(
+    initial_bankroll: float | None,
+    results: dict,
+    config: dict,
+) -> dict | None:
+    if initial_bankroll is None:
+        return None
+    return calculate_bankroll_curve(
+        results["business_events"],
+        initial_bankroll=initial_bankroll,
+        account_cost=_account_cost_from_config(config),
+    )
+
+
+def _account_cost_from_config(config: dict) -> float | None:
+    evaluation = config.get("evaluation", {})
+    funded = config.get("funded", {})
+    if evaluation.get("enabled", True):
+        return evaluation.get("evaluation_cost")
+    return funded.get("account_cost") or evaluation.get("evaluation_cost")
+
+
+def _bankroll_comparison_fields(bankroll_result: dict) -> dict:
+    bankroll_metrics = bankroll_result["metrics"]
+    return {
+        "initial_bankroll": bankroll_metrics["initial_bankroll"],
+        "final_bankroll": bankroll_metrics["final_bankroll"],
+        "lowest_bankroll": bankroll_metrics["lowest_bankroll"],
+        "bankroll_ruined": bankroll_metrics["bankroll_ruined"],
+        "max_bankroll_drawdown": bankroll_metrics["max_bankroll_drawdown"],
+        "bankroll_return": bankroll_metrics["bankroll_return"],
+        "accounts_affordable_remaining": bankroll_metrics[
+            "accounts_affordable_remaining"
+        ],
     }
 
 

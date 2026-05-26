@@ -9,6 +9,7 @@ from typing import Any
 
 import pandas as pd
 
+from onix_fondeo.bankroll import export_bankroll_curve
 from onix_fondeo.models import Account, Payout
 
 
@@ -78,6 +79,13 @@ COMPARISON_COLUMNS = [
     "roi",
     "expected_value_per_evaluation",
     "total_payouts",
+    "initial_bankroll",
+    "final_bankroll",
+    "lowest_bankroll",
+    "bankroll_ruined",
+    "max_bankroll_drawdown",
+    "bankroll_return",
+    "accounts_affordable_remaining",
 ]
 
 OPTIMIZATION_COLUMNS = [
@@ -116,6 +124,8 @@ OPTIMIZATION_COLUMNS = [
     "roi",
     "expected_value_per_evaluation",
     "total_payouts",
+    "final_bankroll",
+    "bankroll_ruined",
 ]
 
 
@@ -166,6 +176,7 @@ def export_results(
     metrics: dict[str, Any] | None = None,
     presets: list[dict[str, Any]] | None = None,
     strategy_metrics: dict[str, Any] | None = None,
+    bankroll_result: dict[str, Any] | None = None,
 ) -> dict[str, Path]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -196,12 +207,18 @@ def export_results(
 
     if metrics is not None:
         file_paths["business_metrics"] = export_metrics(metrics, output_path)
+        if bankroll_result is not None:
+            file_paths["bankroll_curve"] = export_bankroll_curve(
+                bankroll_result,
+                output_path,
+            )
         file_paths["html_report"] = generate_html_report(
             results,
             metrics,
             output_path,
             presets=presets,
             strategy_metrics=strategy_metrics,
+            bankroll_result=bankroll_result,
         )
 
     return file_paths
@@ -582,6 +599,7 @@ def _optimization_table_html(rows: list[dict[str, Any]]) -> str:
         "net_business_pnl",
         "roi",
         "expected_value_per_evaluation",
+        "final_bankroll",
     }
     for row in rows:
         cells = []
@@ -717,6 +735,7 @@ def _format_optimization_cell(column: str, value: Any) -> str:
         "total_net_payout",
         "net_business_pnl",
         "expected_value_per_evaluation",
+        "final_bankroll",
     }:
         return _format_optimization_metric(value, "money")
     if column == "profit_factor":
@@ -760,6 +779,7 @@ def _generate_comparison_html_report(
         "total_evaluation_cost",
         highest=False,
     )
+    best_final_bankroll = _best_value(comparison_rows, "final_bankroll", highest=True)
 
     html = f"""<!doctype html>
 <html lang="en">
@@ -889,6 +909,9 @@ def _generate_comparison_html_report(
     <h2>ROI</h2>
     {_comparison_bar_html(comparison_rows, "roi", value_type="percent")}
 
+    <h2>Final Bankroll</h2>
+    {_comparison_bar_html(comparison_rows, "final_bankroll", value_type="money")}
+
     <h2>Comparison Table</h2>
     <div class="table-wrap">
       {_comparison_table_html(
@@ -898,6 +921,7 @@ def _generate_comparison_html_report(
             "roi": best_roi,
             "total_net_payout": best_payout,
             "total_evaluation_cost": lowest_cost,
+            "final_bankroll": best_final_bankroll,
         },
     )}
     </div>
@@ -999,6 +1023,7 @@ def _format_comparison_value(column: str, value: Any) -> str:
         "payout_rate_on_evaluations",
         "payout_rate_on_passed",
         "roi",
+        "bankroll_return",
     }:
         return format_percent(float(value))
     if column in {
@@ -1007,6 +1032,10 @@ def _format_comparison_value(column: str, value: Any) -> str:
         "total_net_payout",
         "net_business_pnl",
         "expected_value_per_evaluation",
+        "initial_bankroll",
+        "final_bankroll",
+        "lowest_bankroll",
+        "max_bankroll_drawdown",
     }:
         return _format_dollar(float(value))
     if isinstance(value, float):
@@ -1026,6 +1055,12 @@ def _comparison_numeric_columns() -> set[str]:
         "net_business_pnl",
         "roi",
         "expected_value_per_evaluation",
+        "initial_bankroll",
+        "final_bankroll",
+        "lowest_bankroll",
+        "max_bankroll_drawdown",
+        "bankroll_return",
+        "accounts_affordable_remaining",
     }
 
 
@@ -1035,6 +1070,7 @@ def generate_html_report(
     output_dir: str | Path = "data/output",
     presets: list[dict[str, Any]] | None = None,
     strategy_metrics: dict[str, Any] | None = None,
+    bankroll_result: dict[str, Any] | None = None,
 ) -> Path:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -1317,6 +1353,7 @@ def generate_html_report(
     <p class="timestamp">Generated: {escape(generated_at)}</p>
 
     {_strategy_summary_section_html(strategy_metrics)}
+    {_bankroll_summary_section_html(bankroll_result)}
 
     <section>
       <h2>Business Metrics</h2>
@@ -1575,6 +1612,56 @@ def _metrics_cards_html(metrics: dict[str, Any]) -> str:
             )
         )
     return "\n".join(cards)
+
+
+def _bankroll_summary_section_html(
+    bankroll_result: dict[str, Any] | None,
+) -> str:
+    if bankroll_result is None:
+        return ""
+
+    bankroll_metrics = bankroll_result["metrics"]
+    ruined = "Yes" if bankroll_metrics["bankroll_ruined"] else "No"
+    affordable = bankroll_metrics["accounts_affordable_remaining"]
+    affordable_value = "N/A" if affordable is None else affordable
+    return f"""
+    <section>
+      <h2>Bankroll Summary</h2>
+      <div class="cards">
+        {_bankroll_card_html("Initial Bankroll", _format_dollar(bankroll_metrics["initial_bankroll"]))}
+        {_bankroll_card_html("Final Bankroll", _format_dollar(bankroll_metrics["final_bankroll"]), _number_class(bankroll_metrics["final_bankroll"] - bankroll_metrics["initial_bankroll"]))}
+        {_bankroll_card_html("Lowest Bankroll", _format_dollar(bankroll_metrics["lowest_bankroll"]), _number_class(bankroll_metrics["lowest_bankroll"] - bankroll_metrics["initial_bankroll"]))}
+        {_bankroll_card_html("Net Bankroll Change", _format_dollar(bankroll_metrics["net_bankroll_change"]), _number_class(bankroll_metrics["net_bankroll_change"]))}
+        {_bankroll_card_html("Bankroll Return", format_percent(bankroll_metrics["bankroll_return"]), _number_class(bankroll_metrics["bankroll_return"]))}
+        {_bankroll_card_html("Max Bankroll Drawdown", _format_dollar(bankroll_metrics["max_bankroll_drawdown"]), "negative" if bankroll_metrics["max_bankroll_drawdown"] > 0 else "")}
+        {_bankroll_card_html("Ruined", ruined, "negative" if bankroll_metrics["bankroll_ruined"] else "positive")}
+        {_bankroll_card_html("Accounts Affordable Remaining", str(affordable_value))}
+      </div>
+      <div class="chart-card">
+        {render_svg_line_chart(_bankroll_curve_points(bankroll_result["curve"]))}
+        <p class="chart-note">Bankroll after each evaluation cost and payout event.</p>
+      </div>
+    </section>
+"""
+
+
+def _bankroll_curve_points(curve: list[dict[str, Any]]) -> list[tuple[str, float]]:
+    return [
+        (
+            str(point.get("time") or point.get("event_type") or point.get("step")),
+            float(point.get("bankroll", 0) or 0),
+        )
+        for point in curve
+    ]
+
+
+def _bankroll_card_html(label: str, value: str, css_class: str = "") -> str:
+    return (
+        '<div class="card">'
+        f'<div class="card-label">{escape(label)}</div>'
+        f'<div class="card-value {escape(css_class)}">{escape(value)}</div>'
+        "</div>"
+    )
 
 
 def _strategy_summary_section_html(

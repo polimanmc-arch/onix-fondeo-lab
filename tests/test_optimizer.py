@@ -85,6 +85,18 @@ def test_run_stochastic_optimization_with_parallel_workers_returns_rows():
     assert [row["run_id"] for row in rows] == [1, 2]
 
 
+def test_run_stochastic_optimization_can_include_bankroll_fields():
+    rows = run_stochastic_optimization(
+        ohlc=_sample_ohlc(),
+        presets=[_preset()],
+        base_args={"initial_bankroll": 3000},
+        max_runs=1,
+    )
+
+    assert "final_bankroll" in rows[0]
+    assert "bankroll_ruined" in rows[0]
+
+
 def test_filter_ohlc_by_date_limits_rows_without_mutating_source():
     ohlc = pd.DataFrame(
         {

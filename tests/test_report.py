@@ -82,6 +82,45 @@ def test_generate_html_report_omits_strategy_summary_without_metrics(tmp_path):
     assert "Strategy Summary" not in html
 
 
+def test_generate_html_report_includes_bankroll_summary_when_provided(tmp_path):
+    report_path = generate_html_report(
+        _results(),
+        _metrics(),
+        output_dir=tmp_path,
+        bankroll_result={
+            "curve": [
+                {
+                    "step": 0,
+                    "time": None,
+                    "event_type": "INITIAL",
+                    "amount": 0,
+                    "account_id": None,
+                    "bankroll": 3000,
+                }
+            ],
+            "metrics": {
+                "initial_bankroll": 3000,
+                "final_bankroll": 3000,
+                "lowest_bankroll": 3000,
+                "highest_bankroll": 3000,
+                "net_bankroll_change": 0,
+                "bankroll_return": 0,
+                "max_bankroll_drawdown": 0,
+                "max_bankroll_drawdown_percent": 0,
+                "bankroll_ruined": False,
+                "ruin_step": None,
+                "events_count": 0,
+                "accounts_affordable_remaining": 30,
+            },
+        },
+    )
+
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "Bankroll Summary" in html
+    assert "Accounts Affordable Remaining" in html
+
+
 def test_export_optimization_results_adds_ranking_sections(tmp_path):
     files = export_optimization_results(_optimization_rows(), output_dir=tmp_path)
 
