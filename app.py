@@ -174,8 +174,9 @@ def _strategy_controls(strategy_name: str) -> dict[str, Any]:
         }
 
     return {
-        "k_period": st.number_input("K period", min_value=1, value=20, step=1),
-        "d_period": st.number_input("D period", min_value=1, value=5, step=1),
+        "period_k": st.number_input("PeriodK", min_value=1, value=20, step=1),
+        "period_d": st.number_input("PeriodD", min_value=1, value=5, step=1),
+        "smooth": st.number_input("Smooth", min_value=1, value=3, step=1),
         "oversold": st.number_input("Oversold", min_value=0.0, value=20.0),
         "overbought": st.number_input("Overbought", min_value=0.0, value=80.0),
         "signal_mode": st.selectbox("Signal mode", options=["cross", "zone"], index=0),
@@ -284,8 +285,9 @@ def build_strategy(controls: dict[str, Any]):
         )
 
     return StochasticLevelStrategy(
-        k_period=int(params["k_period"]),
-        d_period=int(params["d_period"]),
+        period_k=int(params["period_k"]),
+        period_d=int(params["period_d"]),
+        smooth=int(params["smooth"]),
         oversold_level=params["oversold"],
         overbought_level=params["overbought"],
         signal_mode=params["signal_mode"],
@@ -475,69 +477,93 @@ def render_diagnostics_tab(
     costs = diagnostics["costs"]
     quality = diagnostics["quality"]
 
-    st.subheader("Overtrading")
-    _metric_row(
+    st.subheader("Trade Activity")
+    st.caption("How often the strategy traded and how long trades stayed open.")
+    render_metric_grid(
         [
             ("Total Trades", overtrading["total_trades"]),
             ("Trading Days", overtrading["unique_trading_days"]),
-            ("Avg Trades / Day", f"{overtrading['average_trades_per_day']:.2f}"),
+            ("Avg Trades / Day", format_number(overtrading["average_trades_per_day"])),
             ("Max Trades / Day", overtrading["max_trades_in_one_day"]),
-            ("Avg Trades / Hour", _optional_decimal(overtrading["average_trades_per_hour"])),
-            ("Median Holding", _optional_decimal(overtrading["median_holding_minutes"])),
-        ]
+            ("Avg Trades / Hour", format_number(overtrading["average_trades_per_hour"])),
+            ("Median Holding Minutes", format_number(overtrading["median_holding_minutes"])),
+        ],
+        columns_per_row=3,
     )
 
-    st.subheader("Cost Diagnostics")
-    _metric_row(
+    st.subheader("Cost Impact")
+    st.caption("How much commissions, slippage and spread consumed the strategy edge.")
+    render_metric_grid(
         [
-            ("Gross PnL", _money(costs["gross_pnl"])),
-            ("Net PnL", _money(costs["net_pnl"])),
-            ("Total Cost", _money(costs["total_cost"])),
-            ("Cost / Gross Profit", _optional_percent(costs["cost_as_percent_of_gross_profit"])),
-            ("Avg Cost / Trade", _money(costs["average_cost_per_trade"])),
-            ("Commission", _money(costs["total_commission"])),
-            ("Slippage", _money(costs["total_slippage_cost"])),
-            ("Spread", _money(costs["total_spread_cost"])),
-        ]
+            ("Gross PnL", format_currency_compact(costs["gross_pnl"])),
+            ("Net PnL", format_currency_compact(costs["net_pnl"])),
+            ("Total Cost", format_currency_compact(costs["total_cost"])),
+            ("Avg Cost / Trade", format_currency_compact(costs["average_cost_per_trade"])),
+            ("Commission", format_currency_compact(costs["total_commission"])),
+            ("Slippage", format_currency_compact(costs["total_slippage_cost"])),
+            ("Spread", format_currency_compact(costs["total_spread_cost"])),
+            ("Cost / Gross Profit", format_percent(costs["cost_as_percent_of_gross_profit"])),
+        ],
+        columns_per_row=4,
     )
 
-    st.subheader("Quality Diagnostics")
-    _metric_row(
+    st.subheader("Trade Quality")
+    st.caption("Whether the strategy wins often enough for its average win/loss profile.")
+    render_metric_grid(
         [
-            ("Average Winner", _money(quality["average_winner"])),
-            ("Average Loser", _money(quality["average_loser"])),
-            ("Win Rate", f"{quality['win_rate']:.2%}"),
-            ("Payoff Ratio", _optional_decimal(quality["payoff_ratio"])),
-            ("Breakeven Win Rate", _optional_percent(quality["breakeven_win_rate"])),
-            ("Expectancy / Trade", _money(quality["expectancy_per_trade"])),
-        ]
+            ("Win Rate", format_percent(quality["win_rate"])),
+            ("Average Winner", format_currency_compact(quality["average_winner"])),
+            ("Average Loser", format_currency_compact(quality["average_loser"])),
+            ("Payoff Ratio", format_number(quality["payoff_ratio"])),
+            ("Breakeven Win Rate", format_percent(quality["breakeven_win_rate"])),
+            ("Expectancy / Trade", format_currency_compact(quality["expectancy_per_trade"])),
+        ],
+        columns_per_row=3,
     )
 
+    st.subheader("Warnings / Insights")
     render_diagnostic_warnings(diagnostics, strategy_metrics)
 
-    st.subheader("Exit Reason Breakdown")
-    st.dataframe(diagnostics["exit_reason_table"], use_container_width=True)
+    st.subheader("Diagnostic Tables & Charts")
+    with st.expander("Exit Reason Breakdown", expanded=False):
+        st.dataframe(
+            _format_diagnostic_money_columns(
+                diagnostics["exit_reason_table"],
+                ["NetPnL", "AverageNetPnL"],
+            ),
+            use_container_width=True,
+        )
 
     hourly_table = diagnostics["hourly_table"]
     if not hourly_table.empty:
-        st.subheader("Time-of-Day Diagnostics")
-        st.dataframe(hourly_table, use_container_width=True)
-        st.bar_chart(hourly_table.set_index("Hour")["Trades"])
-        st.bar_chart(hourly_table.set_index("Hour")["NetPnL"])
+        with st.expander("Hourly Diagnostics", expanded=False):
+            st.dataframe(
+                _format_diagnostic_money_columns(hourly_table, ["NetPnL", "TotalCost"]),
+                use_container_width=True,
+            )
+            st.caption("Trades by hour")
+            st.bar_chart(hourly_table.set_index("Hour")["Trades"])
+            st.caption("Net PnL by hour")
+            st.bar_chart(hourly_table.set_index("Hour")["NetPnL"])
 
     daily_table = diagnostics["daily_table"]
     if not daily_table.empty:
-        st.subheader("Daily Diagnostics")
-        st.dataframe(daily_table, use_container_width=True)
-        st.bar_chart(daily_table.set_index("Date")["Trades"])
-        st.bar_chart(daily_table.set_index("Date")["NetPnL"])
-        best_day = diagnostics["best_day"]
-        worst_day = diagnostics["worst_day"]
-        if best_day is not None and worst_day is not None:
-            st.caption(
-                f"Best day: {best_day['Date']} ({_money(best_day['NetPnL'])}) | "
-                f"Worst day: {worst_day['Date']} ({_money(worst_day['NetPnL'])})"
+        with st.expander("Daily Diagnostics", expanded=False):
+            st.dataframe(
+                _format_diagnostic_money_columns(daily_table, ["NetPnL", "TotalCost"]),
+                use_container_width=True,
             )
+            st.caption("Trades by date")
+            st.bar_chart(daily_table.set_index("Date")["Trades"])
+            st.caption("Net PnL by date")
+            st.bar_chart(daily_table.set_index("Date")["NetPnL"])
+            best_day = diagnostics["best_day"]
+            worst_day = diagnostics["worst_day"]
+            if best_day is not None and worst_day is not None:
+                st.caption(
+                    f"Best day: {best_day['Date']} ({format_currency_full(best_day['NetPnL'])}) | "
+                    f"Worst day: {worst_day['Date']} ({format_currency_full(worst_day['NetPnL'])})"
+                )
 
 
 def render_diagnostic_warnings(
@@ -546,20 +572,36 @@ def render_diagnostic_warnings(
 ) -> None:
     overtrading = diagnostics["overtrading"]
     costs = diagnostics["costs"]
+    quality = diagnostics["quality"]
+    insight_count = 0
 
     if overtrading["average_trades_per_day"] > 20:
         st.warning("High trading frequency detected. Costs may dominate results.")
+        insight_count += 1
     if costs["total_cost"] > abs(costs["net_pnl"]) and costs["net_pnl"] < 0:
         st.warning(
             "Total trading costs are larger than the final net loss. Cost control is critical."
         )
+        insight_count += 1
     if _numeric_value(strategy_metrics.get("profit_factor"), default=0.0) < 1:
         st.warning("Profit factor below 1.0 indicates the strategy lost money after costs.")
+        insight_count += 1
     if strategy_metrics.get("total_trades", 0) < 30:
         st.warning("Small sample size. Strategy metrics may not be reliable.")
+        insight_count += 1
     cost_ratio = costs["cost_as_percent_of_gross_profit"]
     if cost_ratio is not None and cost_ratio > 0.5:
         st.warning("Costs consumed more than 50% of gross profit.")
+        insight_count += 1
+    breakeven_win_rate = quality["breakeven_win_rate"]
+    if breakeven_win_rate is not None and quality["win_rate"] < breakeven_win_rate:
+        st.info("Current win rate is below breakeven win rate.")
+        insight_count += 1
+    if abs(quality["average_loser"]) > quality["average_winner"] > 0:
+        st.info("Average loser is larger than average winner.")
+        insight_count += 1
+    if insight_count == 0:
+        st.success("No major diagnostic warnings detected for this sample.")
 
 
 def export_app_outputs(
@@ -941,6 +983,20 @@ def _metric_row(items: list[tuple[str, Any]]) -> None:
         column.metric(label, value)
 
 
+def render_metric_grid(
+    items: list[tuple[str, Any] | tuple[str, Any, str]],
+    columns_per_row: int = 3,
+) -> None:
+    for start in range(0, len(items), columns_per_row):
+        row_items = items[start : start + columns_per_row]
+        columns = st.columns(columns_per_row)
+        for column, item in zip(columns, row_items):
+            label = item[0]
+            value = item[1]
+            help_text = item[2] if len(item) > 2 else None
+            column.metric(label, value, help=help_text)
+
+
 def _account_cost_from_config(config: dict[str, Any]) -> float | None:
     evaluation = config.get("evaluation", {})
     funded = config.get("funded", {})
@@ -956,6 +1012,49 @@ def _blank_to_none(value: str) -> str | None:
 
 def _money(value: float) -> str:
     return f"${value:,.2f}"
+
+
+def format_currency_compact(value: Any) -> str:
+    number = _numeric_value(value)
+    sign = "-$" if number < 0 else "$"
+    absolute = abs(number)
+    if absolute >= 1_000_000:
+        return f"{sign}{absolute / 1_000_000:.1f}M"
+    if absolute >= 1_000:
+        return f"{sign}{absolute / 1_000:.1f}K"
+    return f"{sign}{absolute:,.2f}"
+
+
+def format_currency_full(value: Any) -> str:
+    number = _numeric_value(value)
+    sign = "-$" if number < 0 else "$"
+    return f"{sign}{abs(number):,.2f}"
+
+
+def format_percent(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    return f"{float(value):.2%}"
+
+
+def format_number(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    number = float(value)
+    if number.is_integer():
+        return f"{int(number):,}"
+    return f"{number:,.2f}"
+
+
+def _format_diagnostic_money_columns(
+    dataframe: pd.DataFrame,
+    columns: list[str],
+) -> pd.DataFrame:
+    formatted = dataframe.copy()
+    for column in columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(format_currency_full)
+    return formatted
 
 
 def _optional_decimal(value: Any) -> str:
