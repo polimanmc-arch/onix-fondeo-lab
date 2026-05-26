@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 import sys
 
@@ -311,11 +312,18 @@ def render_outputs(
             ("Total Trades", strategy_metrics["total_trades"]),
             ("Win Rate", f"{strategy_metrics['win_rate']:.2%}"),
             ("Net PnL", _money(strategy_metrics["net_pnl"])),
-            ("Profit Factor", _ratio(strategy_metrics["profit_factor"])),
+            ("Profit Factor", format_profit_factor(strategy_metrics["profit_factor"])),
             ("Total Cost", _money(strategy_metrics["total_cost"])),
             ("Average Trade", _money(strategy_metrics["average_trade"])),
         ]
     )
+    if _is_infinite_profit_factor(strategy_metrics.get("profit_factor")):
+        st.info(
+            "Profit Factor is infinite because there were no losing trades in this "
+            "sample. Interpret carefully."
+        )
+    if strategy_metrics.get("total_trades", 0) < 30:
+        st.warning("Small sample size: strategy metrics may not be reliable.")
 
     st.subheader("Funding Summary")
     _metric_row(
@@ -573,10 +581,25 @@ def _money(value: float) -> str:
     return f"${value:,.2f}"
 
 
-def _ratio(value: float) -> str:
-    if value == float("inf"):
+def format_profit_factor(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if math.isnan(number):
+        return "N/A"
+    if math.isinf(number):
         return "∞"
-    return f"{value:.2f}"
+    return f"{number:.2f}"
+
+
+def _is_infinite_profit_factor(value: Any) -> bool:
+    try:
+        return math.isinf(float(value))
+    except (TypeError, ValueError):
+        return False
 
 
 if __name__ == "__main__":

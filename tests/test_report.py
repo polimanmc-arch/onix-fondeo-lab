@@ -74,6 +74,34 @@ def test_generate_html_report_includes_strategy_summary_when_metrics_are_provide
     assert "Strategy Exit Reasons" in html
 
 
+def test_generate_html_report_formats_infinite_profit_factor(tmp_path):
+    report_path = generate_html_report(
+        _results(),
+        _metrics(),
+        output_dir=tmp_path,
+        strategy_metrics={
+            "total_trades": 2,
+            "win_rate": 1.0,
+            "net_pnl": 100,
+            "profit_factor": float("inf"),
+            "average_trade": 50,
+            "best_trade": 60,
+            "worst_trade": 40,
+            "average_holding_minutes": 12.5,
+            "tp_exits": 1,
+            "sl_exits": 0,
+            "time_exits": 0,
+            "end_of_data_exits": 0,
+        },
+    )
+
+    html = report_path.read_text(encoding="utf-8")
+
+    assert "∞" in html
+    assert "Profit Factor is infinite because there were no losing trades" in html
+    assert "Small sample size" in html
+
+
 def test_generate_html_report_omits_strategy_summary_without_metrics(tmp_path):
     report_path = generate_html_report(_results(), _metrics(), output_dir=tmp_path)
 

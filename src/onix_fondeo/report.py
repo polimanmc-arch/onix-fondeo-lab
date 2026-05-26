@@ -764,11 +764,7 @@ def _format_optimization_metric(value: Any, value_type: str) -> str:
     if value_type == "money":
         return _format_dollar(number)
     if value_type == "ratio":
-        if math.isinf(number):
-            return "∞"
-        if math.isnan(number):
-            return "N/A"
-        return f"{number:.2f}"
+        return format_profit_factor(number)
     if value_type == "decimal":
         return f"{number:,.2f}"
     if value_type == "number":
@@ -1838,10 +1834,12 @@ def _strategy_summary_section_html(
     exit_cards = "\n".join(
         _metric_card_html(label, value, "number") for label, value in exit_items
     )
+    notices = _strategy_metric_notices_html(strategy_metrics)
 
     return f"""
     <section>
       <h2>Strategy Summary</h2>
+      {notices}
       <div class="cards">
         {summary_cards}
       </div>
@@ -1861,6 +1859,27 @@ def _metric_card_html(label: str, value: Any, value_type: str) -> str:
         f"{_format_metric_value(value, value_type)}"
         "</div></div>"
     )
+
+
+def _strategy_metric_notices_html(strategy_metrics: dict[str, Any]) -> str:
+    notices = []
+    profit_factor = strategy_metrics.get("profit_factor")
+    try:
+        is_infinite_profit_factor = math.isinf(float(profit_factor))
+    except (TypeError, ValueError):
+        is_infinite_profit_factor = False
+
+    if is_infinite_profit_factor:
+        notices.append(
+            "Profit Factor is infinite because there were no losing trades in this "
+            "sample. Interpret carefully."
+        )
+    if strategy_metrics.get("total_trades", 0) < 30:
+        notices.append("Small sample size: strategy metrics may not be reliable.")
+
+    if not notices:
+        return ""
+    return "".join(f'<p class="note">{escape(notice)}</p>' for notice in notices)
 
 
 def _presets_catalog_html(presets: list[dict[str, Any]]) -> str:
@@ -2095,9 +2114,7 @@ def _format_metric_value(value: Any, value_type: str) -> str:
     if value_type == "money":
         return escape(format_currency(float(value)))
     if value_type == "ratio":
-        if value == float("inf"):
-            return "inf"
-        return escape(f"{float(value):.2f}")
+        return escape(format_profit_factor(value))
     if value_type == "decimal":
         return escape(f"{float(value):.2f}")
     return escape(str(value))
@@ -2109,6 +2126,20 @@ def _format_cell_value(value: Any) -> str:
     if isinstance(value, float):
         return f"{value:,.2f}"
     return str(value)
+
+
+def format_profit_factor(value: Any) -> str:
+    if value is None:
+        return "N/A"
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return "N/A"
+    if math.isnan(number):
+        return "N/A"
+    if math.isinf(number):
+        return "∞"
+    return f"{number:.2f}"
 
 
 def _number_class(value: Any) -> str:
