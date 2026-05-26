@@ -35,6 +35,9 @@ from onix_fondeo.streaks import calculate_streak_analysis
 
 
 OUTPUT_DIR = Path("data/output")
+DEFAULT_PRESET_COMPANY = "Lucid Trading"
+DEFAULT_PRESET_PLAN = "LucidFlex"
+DEFAULT_PRESET_ACCOUNT_SIZE = 50000
 
 
 def main() -> None:
@@ -61,8 +64,8 @@ def sidebar_controls() -> dict[str, Any]:
             "OHLC CSV path",
             value="data/market_data/sample_NQ_1m.csv",
         )
-        symbol = st.text_input("Symbol", value="MNQ")
-        point_value = st.number_input("Point value", min_value=0.0, value=2.0)
+        symbol = st.text_input("Symbol", value="NQ")
+        point_value = st.number_input("Point value", min_value=0.0, value=20.0)
 
         st.header("Funding Preset")
         presets = list_presets()
@@ -74,21 +77,25 @@ def sidebar_controls() -> dict[str, Any]:
         render_selected_preset_info(selected_preset)
 
         st.header("Strategy")
-        strategy_name = st.selectbox("Strategy", options=["random", "stochastic"])
+        strategy_name = st.selectbox(
+            "Strategy",
+            options=["random", "stochastic"],
+            index=1,
+        )
         strategy_params = _strategy_controls(strategy_name)
 
         st.header("Time Filters")
-        strategy_start_time = st.text_input("Strategy start time", value="")
-        strategy_end_time = st.text_input("Strategy end time", value="")
-        force_close_time = st.text_input("Force close time", value="")
+        strategy_start_time = st.text_input("Strategy start time", value="09:45")
+        strategy_end_time = st.text_input("Strategy end time", value="16:00")
+        force_close_time = st.text_input("Force close time", value="16:00")
 
         st.header("Risk Settings")
         contracts = st.number_input("Contracts", min_value=0.0, value=1.0)
-        stop_loss_points = st.number_input("Stop loss points", min_value=0.0, value=30.0)
+        stop_loss_points = st.number_input("Stop loss points", min_value=0.0, value=70.0)
         take_profit_points = st.number_input(
             "Take profit points",
             min_value=0.0,
-            value=45.0,
+            value=50.0,
         )
         max_holding_minutes = st.number_input(
             "Max holding minutes",
@@ -107,11 +114,11 @@ def sidebar_controls() -> dict[str, Any]:
         spread_points = st.number_input("Spread points", min_value=0.0, value=0.0)
 
         st.header("Bankroll / Risk")
-        bankroll = st.number_input("Bankroll", min_value=0.0, value=0.0)
+        bankroll = st.number_input("Bankroll", min_value=0.0, value=3000.0)
         monte_carlo_runs = st.number_input(
             "Monte Carlo runs",
             min_value=0,
-            value=0,
+            value=100,
             step=100,
         )
         monte_carlo_max_accounts = st.number_input(
@@ -165,11 +172,11 @@ def _strategy_controls(strategy_name: str) -> dict[str, Any]:
         }
 
     return {
-        "k_period": st.number_input("K period", min_value=1, value=14, step=1),
-        "d_period": st.number_input("D period", min_value=1, value=3, step=1),
+        "k_period": st.number_input("K period", min_value=1, value=20, step=1),
+        "d_period": st.number_input("D period", min_value=1, value=5, step=1),
         "oversold": st.number_input("Oversold", min_value=0.0, value=20.0),
         "overbought": st.number_input("Overbought", min_value=0.0, value=80.0),
-        "signal_mode": st.selectbox("Signal mode", options=["cross", "zone"]),
+        "signal_mode": st.selectbox("Signal mode", options=["cross", "zone"], index=0),
         "use_d_confirmation": st.checkbox("Use D confirmation", value=False),
         "min_k_d_gap": st.number_input("Min K/D gap", min_value=0.0, value=0.0),
         "cooldown_bars": st.number_input("Cooldown bars", min_value=0, value=0, step=1),
@@ -450,7 +457,11 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No preset companies are available.")
         st.stop()
 
-    selected_company = st.selectbox("Company", options=companies)
+    selected_company = st.selectbox(
+        "Company",
+        options=companies,
+        index=_default_index(companies, DEFAULT_PRESET_COMPANY),
+    )
     company_presets = [
         preset for preset in presets if (preset.get("company") or "Unknown") == selected_company
     ]
@@ -460,7 +471,11 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No plans are available for the selected company.")
         st.stop()
 
-    selected_plan = st.selectbox("Plan", options=plans)
+    selected_plan = st.selectbox(
+        "Plan",
+        options=plans,
+        index=_default_index(plans, DEFAULT_PRESET_PLAN),
+    )
     plan_presets = [
         preset for preset in company_presets if (preset.get("plan") or "Unknown") == selected_plan
     ]
@@ -477,9 +492,12 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No account sizes are available for the selected plan.")
         st.stop()
 
-    size_labels = {format_account_size(size): size for size in sizes}
-    selected_size_label = st.selectbox("Account Size", options=list(size_labels.keys()))
-    selected_size = size_labels[selected_size_label]
+    selected_size = st.selectbox(
+        "Account Size",
+        options=sizes,
+        index=_default_index(sizes, DEFAULT_PRESET_ACCOUNT_SIZE),
+        format_func=format_account_size,
+    )
     matches = [
         preset
         for preset in plan_presets
@@ -523,6 +541,13 @@ def _account_size_sort_key(size: Any) -> float:
         return float(size)
     except (TypeError, ValueError):
         return float("inf")
+
+
+def _default_index(options: list[Any], preferred_value: Any) -> int:
+    try:
+        return options.index(preferred_value)
+    except ValueError:
+        return 0
 
 
 def _metric_row(items: list[tuple[str, Any]]) -> None:
