@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -18,7 +19,10 @@ from app import (
     filter_trades_for_explorer,
     filter_trades_for_chart,
     build_market_data_summary,
+    build_account_event_timeline,
     build_preset_rules_summary,
+    account_event_timeline_dataframe,
+    format_account_event_timeline_dataframe,
     current_controls_snapshot,
     format_rule_value,
     load_app_setup,
@@ -479,3 +483,74 @@ def test_preset_rules_rows_formats_values_for_display():
 def test_format_rule_value_handles_complex_metadata():
     assert format_rule_value("payout_tiers", {"1": 1500}) == '{"1": 1500}'
     assert format_rule_value("platforms", ["Tradovate", "NinjaTrader"]) == "Tradovate, NinjaTrader"
+
+
+def test_build_account_event_timeline_includes_core_events():
+    account = SimpleNamespace(
+        account_id=1,
+        phase="EVALUATION",
+        status="PASSED",
+        pnl=3000,
+        started_at=None,
+        ended_at="2024-01-02 10:00:00",
+        result_reason="Profit target reached",
+    )
+    payout = SimpleNamespace(
+        account_id=1,
+        payout_time="2024-01-03 10:00:00",
+        gross_payout=1000,
+        net_payout=900,
+    )
+    results = {
+        "accounts": [account],
+        "business_events": [
+            {"time": None, "type": "EVALUATION_COST", "amount": -87, "account_id": 1},
+            {"time": "2024-01-03 10:00:00", "type": "PAYOUT", "amount": 900, "account_id": 1},
+        ],
+        "payouts": [payout],
+        "trade_log": [
+            {
+                "AccountID": 1,
+                "Phase": "EVALUATION",
+                "TradeID": 10,
+                "TradeTime": "2024-01-02 10:00:00",
+                "AppliedNetPnL": 100,
+                "AccountPnL": 3000,
+                "StatusAfterTrade": "PASSED",
+                "StatusReason": "EVALUATION_TARGET_REACHED; Profit target reached",
+            }
+        ],
+    }
+
+    timeline = build_account_event_timeline(results)
+    event_types = {row["EventType"] for row in timeline}
+
+    assert "ACCOUNT_OPENED" in event_types
+    assert "ACCOUNT_PASSED" in event_types
+    assert "EVALUATION_COST" in event_types
+    assert "PAYOUT" in event_types
+    assert "EVALUATION_TARGET_REACHED" in event_types
+    assert [row["Step"] for row in timeline] == list(range(1, len(timeline) + 1))
+
+
+def test_account_event_timeline_dataframe_uses_expected_columns():
+    rows = [
+        {
+            "Step": 1,
+            "Time": None,
+            "AccountID": 1,
+            "Phase": "EVALUATION",
+            "EventType": "EVALUATION_COST",
+            "TradeID": None,
+            "Amount": -87,
+            "AccountPnL": None,
+            "Status": None,
+            "Reason": None,
+        }
+    ]
+
+    dataframe = account_event_timeline_dataframe(rows)
+    formatted = format_account_event_timeline_dataframe(dataframe)
+
+    assert dataframe.columns.tolist()[0:5] == ["Step", "Time", "AccountID", "Phase", "EventType"]
+    assert formatted.loc[0, "Amount"] == "-$87.00"

@@ -370,6 +370,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         )
         if not comparison_rows:
             st.warning("No runnable presets were available for comparison.")
+    account_event_timeline = build_account_event_timeline(results)
 
     exported_files = export_app_outputs(
         trades,
@@ -396,6 +397,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         config,
         comparison_rows,
         market_data_summary,
+        account_event_timeline,
     )
 
 
@@ -810,6 +812,169 @@ def app_comparison_row(
     }
 
 
+def build_account_event_timeline(results: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    accounts_by_id_phase = {
+        (account.account_id, account.phase): account
+        for account in results.get("accounts", [])
+    }
+
+    for account in results.get("accounts", []):
+        rows.append(
+            account_timeline_row(
+                time=account.started_at,
+                account_id=account.account_id,
+                phase=account.phase,
+                event_type="ACCOUNT_OPENED",
+                status=account.status,
+                pnl=account.pnl,
+            )
+        )
+        if account.status != "ACTIVE" or account.ended_at is not None:
+            event_type = "ACCOUNT_PASSED" if account.status == "PASSED" else "ACCOUNT_FAILED"
+            rows.append(
+                account_timeline_row(
+                    time=account.ended_at,
+                    account_id=account.account_id,
+                    phase=account.phase,
+                    event_type=event_type,
+                    status=account.status,
+                    pnl=account.pnl,
+                    reason=account.result_reason,
+                )
+            )
+
+    payout_lookup = {
+        (payout.account_id, str(payout.payout_time)): payout
+        for payout in results.get("payouts", [])
+    }
+    for event in results.get("business_events", []):
+        payout = payout_lookup.get((event.get("account_id"), str(event.get("time"))))
+        rows.append(
+            account_timeline_row(
+                time=event.get("time"),
+                account_id=event.get("account_id"),
+                phase=account_phase_for_event(event, accounts_by_id_phase),
+                event_type=event.get("type"),
+                amount=event.get("amount"),
+                reason=payout_reason(payout),
+            )
+        )
+
+    seen_reasons: set[tuple[Any, Any, str]] = set()
+    for trade_event in results.get("trade_log", []):
+        reason = trade_event.get("StatusReason")
+        if not reason:
+            continue
+        key = (
+            trade_event.get("AccountID"),
+            trade_event.get("TradeID"),
+            str(reason),
+        )
+        if key in seen_reasons:
+            continue
+        seen_reasons.add(key)
+        rows.append(
+            account_timeline_row(
+                time=trade_event.get("TradeTime"),
+                account_id=trade_event.get("AccountID"),
+                phase=trade_event.get("Phase"),
+                event_type=trade_log_event_type(reason),
+                trade_id=trade_event.get("TradeID"),
+                status=trade_event.get("StatusAfterTrade"),
+                amount=trade_event.get("AppliedNetPnL"),
+                pnl=trade_event.get("AccountPnL"),
+                reason=reason,
+            )
+        )
+
+    rows = sorted(rows, key=account_event_sort_key)
+    for index, row in enumerate(rows, start=1):
+        row["Step"] = index
+    return rows
+
+
+def account_timeline_row(
+    time: Any,
+    account_id: Any,
+    phase: Any,
+    event_type: Any,
+    amount: Any = None,
+    pnl: Any = None,
+    status: Any = None,
+    reason: Any = None,
+    trade_id: Any = None,
+) -> dict[str, Any]:
+    return {
+        "Step": None,
+        "Time": time,
+        "AccountID": account_id,
+        "Phase": phase,
+        "EventType": event_type,
+        "TradeID": trade_id,
+        "Amount": amount,
+        "AccountPnL": pnl,
+        "Status": status,
+        "Reason": reason,
+    }
+
+
+def account_phase_for_event(
+    event: dict[str, Any],
+    accounts_by_id_phase: dict[tuple[Any, str], Any],
+) -> str | None:
+    account_id = event.get("account_id")
+    event_type = event.get("type")
+    if event_type == "EVALUATION_COST":
+        return "EVALUATION"
+    if event_type == "PAYOUT":
+        return "FUNDED"
+    for phase in ["EVALUATION", "FUNDED"]:
+        if (account_id, phase) in accounts_by_id_phase:
+            return phase
+    return None
+
+
+def payout_reason(payout: Any | None) -> str | None:
+    if payout is None:
+        return None
+    return (
+        f"Gross payout {format_currency_full(payout.gross_payout)}; "
+        f"net payout {format_currency_full(payout.net_payout)}"
+    )
+
+
+def trade_log_event_type(reason: str) -> str:
+    if "EVALUATION_TARGET_REACHED" in reason:
+        return "EVALUATION_TARGET_REACHED"
+    if "FUNDED_PAYOUT_TRIGGER_REACHED" in reason:
+        return "FUNDED_PAYOUT_TRIGGER_REACHED"
+    if "ACCOUNT_MAX_LOSS" in reason:
+        return "ACCOUNT_MAX_LOSS"
+    if "ACCOUNT_DAILY_LOSS" in reason:
+        return "ACCOUNT_DAILY_LOSS"
+    if "consistency" in reason.lower():
+        return "PAYOUT_BLOCKED_CONSISTENCY"
+    if "Winning days" in reason:
+        return "PAYOUT_BLOCKED_WINNING_DAYS"
+    if "Daily continuity" in reason:
+        return "PAYOUT_BLOCKED_DAILY_CONTINUITY"
+    return "STATUS_REASON"
+
+
+def account_event_sort_key(row: dict[str, Any]) -> tuple[int, Any, Any, str]:
+    time_value = row.get("Time")
+    if time_value is None or pd.isna(time_value):
+        sort_time = pd.Timestamp.min
+    else:
+        sort_time = pd.to_datetime(time_value, errors="coerce")
+        if pd.isna(sort_time):
+            sort_time = pd.Timestamp.min
+    account_id = row.get("AccountID")
+    account_id = -1 if account_id is None or pd.isna(account_id) else account_id
+    return (0, sort_time, account_id, str(row.get("EventType")))
+
+
 def store_analysis_results(
     ohlc_df: pd.DataFrame,
     trades_df: pd.DataFrame,
@@ -825,6 +990,7 @@ def store_analysis_results(
     config: dict[str, Any],
     comparison_rows: list[dict[str, Any]] | None = None,
     market_data_summary: dict[str, Any] | None = None,
+    account_event_timeline: list[dict[str, Any]] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -838,6 +1004,7 @@ def store_analysis_results(
         "streak_analysis": streak_analysis,
         "comparison_rows": comparison_rows or [],
         "market_data_summary": market_data_summary,
+        "account_event_timeline": account_event_timeline or [],
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -1115,6 +1282,8 @@ def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
 def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
     with st.expander("Funding Results", expanded=True):
         render_funding_summary(analysis_state["business_metrics"])
+    with st.expander("Account Event Timeline", expanded=True):
+        render_account_event_timeline(analysis_state.get("account_event_timeline", []))
     with st.expander("Bankroll", expanded=True):
         render_bankroll_summary(analysis_state.get("bankroll_result"))
     with st.expander("Risk of Ruin", expanded=False):
@@ -1181,6 +1350,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
                 "business_metrics": analysis_state["business_metrics"],
                 "comparison_rows": comparison_rows,
                 "market_data_summary": market_data_summary,
+                "account_event_timeline": analysis_state.get("account_event_timeline", []),
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
                 else analysis_state["bankroll_result"]["metrics"],
@@ -1276,6 +1446,85 @@ def render_funding_summary(business_metrics: dict[str, Any]) -> None:
             ("ROI", f"{business_metrics['roi']:.2%}"),
         ]
     )
+
+
+def render_account_event_timeline(timeline_rows: list[dict[str, Any]]) -> None:
+    if not timeline_rows:
+        st.info("No account events are available for this run.")
+        return
+
+    timeline = account_event_timeline_dataframe(timeline_rows)
+    event_types = ["All"] + sorted(timeline["EventType"].dropna().astype(str).unique())
+    account_ids = ["All"] + [
+        str(value)
+        for value in sorted(timeline["AccountID"].dropna().unique())
+    ]
+
+    columns = st.columns(3)
+    selected_event_type = columns[0].selectbox(
+        "Event type",
+        options=event_types,
+        key="timeline_event_type_filter",
+    )
+    selected_account_id = columns[1].selectbox(
+        "Account",
+        options=account_ids,
+        key="timeline_account_filter",
+    )
+    max_rows = columns[2].number_input(
+        "Max rows",
+        min_value=25,
+        max_value=1000,
+        value=200,
+        step=25,
+        key="timeline_max_rows",
+    )
+
+    filtered = timeline.copy()
+    if selected_event_type != "All":
+        filtered = filtered[filtered["EventType"].astype(str) == selected_event_type]
+    if selected_account_id != "All":
+        filtered = filtered[filtered["AccountID"].astype(str) == selected_account_id]
+
+    st.dataframe(
+        format_account_event_timeline_dataframe(filtered.head(int(max_rows))),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download account timeline CSV",
+        data=timeline.to_csv(index=False),
+        file_name="account_event_timeline.csv",
+        mime="text/csv",
+    )
+
+
+def account_event_timeline_dataframe(timeline_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    columns = [
+        "Step",
+        "Time",
+        "AccountID",
+        "Phase",
+        "EventType",
+        "TradeID",
+        "Amount",
+        "AccountPnL",
+        "Status",
+        "Reason",
+    ]
+    return pd.DataFrame(timeline_rows, columns=columns)
+
+
+def format_account_event_timeline_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    formatted = dataframe.copy()
+    for column in ["Amount", "AccountPnL"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(
+                lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
+            )
+    if "Time" in formatted.columns:
+        formatted["Time"] = formatted["Time"].apply(_optional_datetime)
+    return formatted
 
 
 def render_bankroll_summary(bankroll_result: dict[str, Any] | None) -> None:
