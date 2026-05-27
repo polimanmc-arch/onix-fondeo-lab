@@ -26,6 +26,7 @@ from app import (
     build_account_summary,
     format_account_event_timeline_dataframe,
     format_account_summary_dataframe,
+    format_bankroll_curve_dataframe,
     current_controls_snapshot,
     format_rule_value,
     load_app_setup,
@@ -35,6 +36,7 @@ from app import (
     preset_option_label,
     preset_rules_rows,
     save_app_setup,
+    stable_selected_trade_id,
     slugify_setup_name,
     validate_market_data_file,
 )
@@ -629,3 +631,43 @@ def test_account_summary_dataframe_formats_money_and_flags():
     assert dataframe.columns.tolist()[0:5] == ["AccountID", "Phase", "Status", "FinalPnL", "HighWatermark"]
     assert formatted.loc[0, "FinalPnL"] == "$500.00"
     assert formatted.loc[0, "DrawdownLocked"] == "Yes"
+
+
+def test_stable_selected_trade_id_keeps_valid_selection():
+    assert stable_selected_trade_id([1, 2, 3], 2) == 2
+
+
+def test_stable_selected_trade_id_resets_invalid_selection():
+    assert stable_selected_trade_id([1, 2, 3], 99) == 1
+    assert stable_selected_trade_id([], 99) is None
+
+
+def test_format_bankroll_curve_dataframe_formats_amounts():
+    curve = pd.DataFrame(
+        [
+            {
+                "step": 1,
+                "time": None,
+                "event_type": "INITIAL",
+                "amount": 0,
+                "account_id": None,
+                "bankroll": 3000,
+                "EventLabel": "drop me",
+            },
+            {
+                "step": 2,
+                "time": "2024-01-02 10:00:00",
+                "event_type": "EVALUATION_COST",
+                "amount": -87,
+                "account_id": 1,
+                "bankroll": 2913,
+                "EventLabel": "drop me",
+            },
+        ]
+    )
+
+    formatted = format_bankroll_curve_dataframe(curve)
+
+    assert formatted.loc[0, "bankroll"] == "$3,000.00"
+    assert formatted.loc[1, "amount"] == "-$87.00"
+    assert "EventLabel" not in formatted.columns

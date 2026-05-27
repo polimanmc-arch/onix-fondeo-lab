@@ -1692,6 +1692,7 @@ def render_bankroll_chart(bankroll_result: dict[str, Any]) -> None:
         return
 
     x_column = "time" if "time" in curve_df.columns and curve_df["time"].notna().any() else "step"
+    curve_df["EventLabel"] = curve_df.apply(bankroll_event_label, axis=1)
     fig = go.Figure(
         data=[
             go.Scatter(
@@ -1703,6 +1704,28 @@ def render_bankroll_chart(bankroll_result: dict[str, Any]) -> None:
             )
         ]
     )
+    if "event_type" in curve_df.columns:
+        event_df = curve_df[curve_df["event_type"].astype(str) != "INITIAL"].copy()
+    else:
+        event_df = curve_df.head(0).copy()
+    if not event_df.empty:
+        positive_events = event_df[pd.to_numeric(event_df.get("amount"), errors="coerce") >= 0]
+        negative_events = event_df[pd.to_numeric(event_df.get("amount"), errors="coerce") < 0]
+        add_bankroll_event_markers(fig, positive_events, x_column, "Positive Events", "#16a34a")
+        add_bankroll_event_markers(fig, negative_events, x_column, "Cost / Loss Events", "#dc2626")
+        for _, row in important_bankroll_events(event_df).iterrows():
+            fig.add_annotation(
+                x=row[x_column],
+                y=row["bankroll"],
+                text=str(row.get("event_type")),
+                showarrow=True,
+                arrowhead=2,
+                ax=0,
+                ay=-35,
+                bgcolor="rgba(255,255,255,0.85)",
+                bordercolor="#94a3b8",
+                font=dict(size=11),
+            )
     fig.update_layout(
         title="Bankroll Evolution",
         xaxis_title="Event",
@@ -1711,7 +1734,68 @@ def render_bankroll_chart(bankroll_result: dict[str, Any]) -> None:
         margin=dict(l=20, r=20, t=45, b=20),
     )
     st.plotly_chart(fig, use_container_width=True)
-    st.dataframe(curve_df, use_container_width=True)
+    st.dataframe(format_bankroll_curve_dataframe(curve_df), use_container_width=True)
+
+
+def add_bankroll_event_markers(
+    fig: go.Figure,
+    events: pd.DataFrame,
+    x_column: str,
+    name: str,
+    color: str,
+) -> None:
+    if events.empty:
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=events[x_column],
+            y=events["bankroll"],
+            mode="markers",
+            name=name,
+            marker=dict(size=11, color=color, line=dict(width=1, color="white")),
+            text=events["EventLabel"],
+            hovertemplate="%{text}<extra></extra>",
+        )
+    )
+
+
+def important_bankroll_events(events: pd.DataFrame, max_events: int = 6) -> pd.DataFrame:
+    if events.empty or "bankroll" not in events.columns:
+        return events.head(0)
+    selected_indexes = set()
+    selected_indexes.add(events["bankroll"].idxmin())
+    selected_indexes.add(events["bankroll"].idxmax())
+    if "amount" in events.columns:
+        amount = pd.to_numeric(events["amount"], errors="coerce")
+        if amount.notna().any():
+            selected_indexes.update(amount.abs().sort_values(ascending=False).head(max_events).index)
+    return events.loc[list(selected_indexes)].sort_values("step").head(max_events)
+
+
+def bankroll_event_label(row: pd.Series) -> str:
+    amount = row.get("amount")
+    amount_text = "N/A" if pd.isna(amount) else format_currency_full(amount)
+    return (
+        f"Step {row.get('step')}<br>"
+        f"Event: {row.get('event_type')}<br>"
+        f"Amount: {amount_text}<br>"
+        f"Bankroll: {format_currency_full(row.get('bankroll'))}<br>"
+        f"Account: {row.get('account_id')}"
+    )
+
+
+def format_bankroll_curve_dataframe(curve_df: pd.DataFrame) -> pd.DataFrame:
+    formatted = curve_df.copy()
+    for column in ["amount", "bankroll"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(
+                lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
+            )
+    if "time" in formatted.columns:
+        formatted["time"] = formatted["time"].apply(_optional_datetime)
+    if "EventLabel" in formatted.columns:
+        formatted = formatted.drop(columns=["EventLabel"])
+    return formatted
 
 
 def render_risk_summary(
@@ -1958,7 +2042,15 @@ def render_backtest_trade_explorer(analysis_state: dict[str, Any]) -> None:
 
     # Future: replace selectbox with interactive row selection / double-click using streamlit-aggrid.
     trade_ids = filtered_trades["TradeID"].tolist()
-    selected_trade_id = st.selectbox("Select TradeID to inspect", options=trade_ids)
+    st.session_state["explorer_selected_trade_id"] = stable_selected_trade_id(
+        trade_ids,
+        st.session_state.get("explorer_selected_trade_id"),
+    )
+    selected_trade_id = st.selectbox(
+        "Select TradeID to inspect",
+        options=trade_ids,
+        key="explorer_selected_trade_id",
+    )
     selected_trade = filtered_trades[filtered_trades["TradeID"] == selected_trade_id].iloc[0]
     context_minutes = st.number_input(
         "Context minutes before/after",
@@ -1966,6 +2058,7 @@ def render_backtest_trade_explorer(analysis_state: dict[str, Any]) -> None:
         max_value=240,
         value=60,
         step=5,
+        key="explorer_context_minutes",
     )
     render_selected_trade_chart(
         ohlc_df=ohlc_df,
@@ -2176,6 +2269,14 @@ def filter_trades_for_explorer(
     if maximum_net_pnl is not None:
         trades = trades[trades["NetPnL"] <= float(maximum_net_pnl)]
     return trades.sort_values("EntryTime").reset_index(drop=True)
+
+
+def stable_selected_trade_id(trade_ids: list[Any], current_trade_id: Any) -> Any:
+    if not trade_ids:
+        return None
+    if current_trade_id in trade_ids:
+        return current_trade_id
+    return trade_ids[0]
 
 
 def render_selected_trade_chart(
