@@ -1212,9 +1212,14 @@ def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
 
     st.subheader("Preset Comparison")
     comparison_df = comparison_rows_to_dataframe(comparison_rows)
-    render_comparison_rankings(comparison_df)
+    filtered_df = render_comparison_filters(comparison_df)
+    if filtered_df.empty:
+        st.warning("No comparison rows match the selected filters.")
+        return
+    render_comparison_rankings(filtered_df)
+    render_comparison_visual_rankings(filtered_df)
     st.dataframe(
-        comparison_display_dataframe(comparison_rows),
+        format_comparison_dataframe(filtered_df),
         hide_index=True,
         use_container_width=True,
     )
@@ -1224,6 +1229,44 @@ def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
         file_name="app_preset_comparison.csv",
         mime="text/csv",
     )
+
+
+def render_comparison_filters(comparison_df: pd.DataFrame) -> pd.DataFrame:
+    columns = st.columns(2)
+    company_options = sorted(comparison_df["company"].dropna().astype(str).unique())
+    plan_options = sorted(comparison_df["plan"].dropna().astype(str).unique())
+    _ensure_multiselect_choices("comparison_company_filter", company_options)
+    _ensure_multiselect_choices("comparison_plan_filter", plan_options)
+    selected_companies = columns[0].multiselect(
+        "Filter companies",
+        options=company_options,
+        default=company_options,
+        key="comparison_company_filter",
+    )
+    selected_plans = columns[1].multiselect(
+        "Filter plans",
+        options=plan_options,
+        default=plan_options,
+        key="comparison_plan_filter",
+    )
+    return filter_comparison_dataframe(
+        comparison_df,
+        companies=selected_companies,
+        plans=selected_plans,
+    )
+
+
+def filter_comparison_dataframe(
+    comparison_df: pd.DataFrame,
+    companies: list[str] | None = None,
+    plans: list[str] | None = None,
+) -> pd.DataFrame:
+    filtered = comparison_df.copy()
+    if companies is not None:
+        filtered = filtered[filtered["company"].astype(str).isin(companies)]
+    if plans is not None:
+        filtered = filtered[filtered["plan"].astype(str).isin(plans)]
+    return filtered
 
 
 def render_comparison_rankings(comparison_df: pd.DataFrame) -> None:
@@ -1254,6 +1297,45 @@ def render_comparison_rankings(comparison_df: pd.DataFrame) -> None:
     render_metric_grid(cards, columns_per_row=2)
 
 
+def render_comparison_visual_rankings(comparison_df: pd.DataFrame) -> None:
+    chart_metrics = [
+        ("Net Business PnL", "net_business_pnl"),
+        ("ROI", "roi"),
+        ("Final Bankroll", "final_bankroll"),
+        ("Risk-Adjusted Score", "risk_adjusted_score"),
+    ]
+    with st.expander("Visual Rankings", expanded=True):
+        for title, metric in chart_metrics:
+            chart_df = comparison_chart_dataframe(comparison_df, metric)
+            if chart_df.empty:
+                continue
+            st.caption(title)
+            st.bar_chart(chart_df.set_index("Preset")[metric])
+
+
+def comparison_chart_dataframe(
+    comparison_df: pd.DataFrame,
+    metric: str,
+    top_n: int = 10,
+) -> pd.DataFrame:
+    if metric not in comparison_df.columns:
+        return pd.DataFrame(columns=["Preset", metric])
+    chart_df = comparison_df.copy()
+    chart_df[metric] = pd.to_numeric(chart_df[metric], errors="coerce")
+    chart_df = chart_df.dropna(subset=[metric])
+    if chart_df.empty:
+        return pd.DataFrame(columns=["Preset", metric])
+    chart_df["Preset"] = chart_df.apply(comparison_preset_label, axis=1)
+    return chart_df[["Preset", metric]].sort_values(metric, ascending=False).head(top_n)
+
+
+def comparison_preset_label(row: pd.Series) -> str:
+    return (
+        f"{row.get('company')} | {row.get('plan')} | "
+        f"{format_account_size(row.get('account_size'))}"
+    )
+
+
 def comparison_rows_to_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.DataFrame:
     dataframe = pd.DataFrame(comparison_rows)
     if dataframe.empty:
@@ -1280,7 +1362,10 @@ def comparison_rows_to_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.Da
 
 
 def comparison_display_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.DataFrame:
-    dataframe = comparison_rows_to_dataframe(comparison_rows)
+    return format_comparison_dataframe(comparison_rows_to_dataframe(comparison_rows))
+
+
+def format_comparison_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     if dataframe.empty:
         return dataframe
     formatted = dataframe.copy()
@@ -3248,6 +3333,13 @@ def _ensure_widget_choice(key: str, options: list[Any], preferred_value: Any) ->
     if st.session_state.get(key) in options:
         return
     st.session_state[key] = preferred_value if preferred_value in options else options[0]
+
+
+def _ensure_multiselect_choices(key: str, options: list[Any]) -> None:
+    current = st.session_state.get(key)
+    if current is None:
+        return
+    st.session_state[key] = [value for value in current if value in options]
 
 
 def _metric_row(items: list[tuple[str, Any]]) -> None:

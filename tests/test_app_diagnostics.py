@@ -13,9 +13,12 @@ from app import (
     app_comparison_row,
     build_trade_diagnostics,
     comparison_display_dataframe,
+    comparison_chart_dataframe,
+    comparison_preset_label,
     comparison_rows_to_dataframe,
     compute_stochastic_for_chart,
     export_comparison_rows,
+    filter_comparison_dataframe,
     filter_trades_for_explorer,
     filter_trades_for_chart,
     build_market_data_summary,
@@ -299,6 +302,56 @@ def test_comparison_display_dataframe_formats_readable_values():
     assert dataframe.loc[0, "account_size"] == "50K"
     assert dataframe.loc[0, "pass_rate"] == "50.00%"
     assert dataframe.loc[0, "net_business_pnl"] == "$600.00"
+
+
+def test_filter_comparison_dataframe_filters_company_and_plan():
+    dataframe = pd.DataFrame(
+        [
+            {"company": "Tradeify", "plan": "Growth", "net_business_pnl": 100},
+            {"company": "Lucid Trading", "plan": "LucidFlex", "net_business_pnl": 50},
+            {"company": "Tradeify", "plan": "Select Flex", "net_business_pnl": 25},
+        ]
+    )
+
+    filtered = filter_comparison_dataframe(
+        dataframe,
+        companies=["Tradeify"],
+        plans=["Growth"],
+    )
+
+    assert filtered["plan"].tolist() == ["Growth"]
+
+
+def test_comparison_chart_dataframe_sorts_and_labels_top_rows():
+    dataframe = pd.DataFrame(
+        [
+            {
+                "company": "Tradeify",
+                "plan": "Growth",
+                "account_size": 50000,
+                "net_business_pnl": 100,
+            },
+            {
+                "company": "Lucid Trading",
+                "plan": "LucidFlex",
+                "account_size": 50000,
+                "net_business_pnl": 250,
+            },
+        ]
+    )
+
+    chart = comparison_chart_dataframe(dataframe, "net_business_pnl", top_n=1)
+
+    assert chart["Preset"].tolist() == ["Lucid Trading | LucidFlex | 50K"]
+    assert chart["net_business_pnl"].tolist() == [250]
+
+
+def test_comparison_preset_label_uses_account_size_format():
+    label = comparison_preset_label(
+        pd.Series({"company": "Tradeify", "plan": "Growth", "account_size": 50000})
+    )
+
+    assert label == "Tradeify | Growth | 50K"
 
 
 def test_export_comparison_rows_creates_csv(tmp_path):
