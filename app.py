@@ -39,6 +39,8 @@ from onix_fondeo.streaks import calculate_streak_analysis
 
 
 OUTPUT_DIR = Path("data/output")
+MARKET_DATA_DIR = Path("data/market_data")
+CUSTOM_MARKET_DATA_OPTION = "Custom path..."
 DEFAULT_PRESET_COMPANY = "Lucid Trading"
 DEFAULT_PRESET_PLAN = "LucidFlex"
 DEFAULT_PRESET_ACCOUNT_SIZE = 50000
@@ -68,12 +70,10 @@ def main() -> None:
 def sidebar_controls() -> dict[str, Any]:
     with st.sidebar:
         st.header("Market Data")
-        market_data_path = st.text_input(
-            "OHLC CSV path",
-            value="data/market_data/sample_NQ_1m.csv",
-        )
         symbol = st.text_input("Symbol", value="NQ")
         point_value = st.number_input("Point value", min_value=0.0, value=20.0)
+        market_data_path = market_data_file_selector()
+        render_market_data_validator(market_data_path, symbol)
 
         st.header("Funding Preset")
         presets = list_presets()
@@ -236,6 +236,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
     )
 
     ohlc = load_ohlc_data(controls["market_data_path"], symbol=controls["symbol"])
+    market_data_summary = build_market_data_summary(ohlc, controls["market_data_path"])
     strategy = build_strategy(controls)
     trades = backtest_strategy(
         ohlc=ohlc,
@@ -319,6 +320,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         controls,
         config,
         comparison_rows,
+        market_data_summary,
     )
 
 
@@ -345,6 +347,137 @@ def build_strategy(controls: dict[str, Any]):
         start_time=controls["strategy_start_time"],
         end_time=controls["strategy_end_time"],
     )
+
+
+def market_data_file_selector() -> str:
+    file_options = market_data_file_options()
+    default_path = str(MARKET_DATA_DIR / "sample_NQ_1m.csv")
+    default_option = default_path if default_path in file_options else CUSTOM_MARKET_DATA_OPTION
+    options = file_options + [CUSTOM_MARKET_DATA_OPTION]
+    selected_option = st.selectbox(
+        "OHLC file",
+        options=options,
+        index=_default_index(options, default_option),
+        format_func=market_data_option_label,
+    )
+    if selected_option == CUSTOM_MARKET_DATA_OPTION:
+        return st.text_input("Custom OHLC CSV path", value=default_path)
+    st.caption(selected_option)
+    return selected_option
+
+
+def market_data_file_options(directory: Path = MARKET_DATA_DIR) -> list[str]:
+    if not directory.exists():
+        return []
+    return [
+        str(path.as_posix())
+        for path in sorted(directory.glob("*.csv"), key=lambda item: item.name.lower())
+        if path.is_file()
+    ]
+
+
+def market_data_option_label(option: str) -> str:
+    if option == CUSTOM_MARKET_DATA_OPTION:
+        return option
+    try:
+        path = Path(option)
+        return f"{path.name} ({path.parent.as_posix()})"
+    except TypeError:
+        return str(option)
+
+
+def render_market_data_validator(file_path: str, symbol: str) -> None:
+    with st.expander("Validate market data", expanded=False):
+        st.caption("Checks format, numeric prices and OHLC integrity before running.")
+        if st.button("Validate OHLC file"):
+            st.session_state["market_data_validation"] = validate_market_data_file(
+                file_path,
+                symbol,
+            )
+        validation = st.session_state.get("market_data_validation")
+        if not validation:
+            return
+        if validation["ok"]:
+            st.success("OHLC file is valid.")
+            st.dataframe(
+                pd.DataFrame(_market_data_summary_rows(validation["summary"])),
+                hide_index=True,
+                use_container_width=True,
+            )
+        else:
+            st.error(validation["error"])
+
+
+def validate_market_data_file(file_path: str, symbol: str | None = None) -> dict[str, Any]:
+    try:
+        ohlc = load_ohlc_data(file_path, symbol=symbol)
+    except Exception as error:
+        return {"ok": False, "error": str(error), "summary": None}
+    return {
+        "ok": True,
+        "error": None,
+        "summary": build_market_data_summary(ohlc, file_path),
+    }
+
+
+def build_market_data_summary(ohlc: pd.DataFrame, file_path: str | None = None) -> dict[str, Any]:
+    if ohlc.empty:
+        return {
+            "file_path": file_path,
+            "rows": 0,
+            "start": None,
+            "end": None,
+            "trading_days": 0,
+            "symbols": "",
+            "time_start": None,
+            "time_end": None,
+            "close_min": None,
+            "close_max": None,
+            "timezone": ohlc.attrs.get("timezone"),
+        }
+
+    data = ohlc.copy()
+    date_time = pd.to_datetime(data["DateTime"], errors="coerce")
+    symbols = ""
+    if "Symbol" in data.columns:
+        symbols = ", ".join(sorted({str(value) for value in data["Symbol"].dropna().unique()}))
+
+    return {
+        "file_path": file_path,
+        "rows": int(len(data)),
+        "start": date_time.min(),
+        "end": date_time.max(),
+        "trading_days": int(date_time.dt.date.nunique()),
+        "symbols": symbols,
+        "time_start": None if date_time.dropna().empty else str(date_time.dt.time.min()),
+        "time_end": None if date_time.dropna().empty else str(date_time.dt.time.max()),
+        "close_min": float(pd.to_numeric(data["Close"], errors="coerce").min()),
+        "close_max": float(pd.to_numeric(data["Close"], errors="coerce").max()),
+        "timezone": ohlc.attrs.get("timezone"),
+    }
+
+
+def _market_data_summary_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"Metric": "File", "Value": summary.get("file_path")},
+        {"Metric": "Rows", "Value": format_number(summary.get("rows"))},
+        {"Metric": "Start", "Value": _optional_datetime(summary.get("start"))},
+        {"Metric": "End", "Value": _optional_datetime(summary.get("end"))},
+        {"Metric": "Trading days", "Value": format_number(summary.get("trading_days"))},
+        {"Metric": "Symbols", "Value": summary.get("symbols") or "N/A"},
+        {
+            "Metric": "Time range",
+            "Value": f"{summary.get('time_start') or 'N/A'} - {summary.get('time_end') or 'N/A'}",
+        },
+        {
+            "Metric": "Close range",
+            "Value": (
+                f"{_optional_decimal(summary.get('close_min'))} - "
+                f"{_optional_decimal(summary.get('close_max'))}"
+            ),
+        },
+        {"Metric": "Timezone", "Value": summary.get("timezone") or "N/A"},
+    ]
 
 
 def run_app_preset_comparison(
@@ -441,6 +574,7 @@ def store_analysis_results(
     controls: dict[str, Any],
     config: dict[str, Any],
     comparison_rows: list[dict[str, Any]] | None = None,
+    market_data_summary: dict[str, Any] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -453,6 +587,7 @@ def store_analysis_results(
         "required_bankroll_result": required_bankroll_result,
         "streak_analysis": streak_analysis,
         "comparison_rows": comparison_rows or [],
+        "market_data_summary": market_data_summary,
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -743,6 +878,18 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
         use_container_width=True,
     )
 
+    st.subheader("Market Data Quality")
+    market_data_summary = analysis_state.get("market_data_summary")
+    if market_data_summary:
+        st.success("Loaded OHLC data passed validation.")
+        st.dataframe(
+            pd.DataFrame(_market_data_summary_rows(market_data_summary)),
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.info("Run an analysis or use the sidebar validator to inspect market data quality.")
+
     st.subheader("Generated Outputs")
     exported_files = analysis_state.get("exported_files", {})
     output_rows = [
@@ -770,6 +917,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
                 "strategy_metrics": analysis_state["strategy_metrics"],
                 "business_metrics": analysis_state["business_metrics"],
                 "comparison_rows": comparison_rows,
+                "market_data_summary": market_data_summary,
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
                 else analysis_state["bankroll_result"]["metrics"],
@@ -2320,6 +2468,12 @@ def _optional_decimal(value: Any) -> str:
     if value is None:
         return "N/A"
     return f"{float(value):.2f}"
+
+
+def _optional_datetime(value: Any) -> str:
+    if value is None or pd.isna(value):
+        return "N/A"
+    return str(value)
 
 
 def _optional_percent(value: Any) -> str:

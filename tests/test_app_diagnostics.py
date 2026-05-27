@@ -17,8 +17,12 @@ from app import (
     export_comparison_rows,
     filter_trades_for_explorer,
     filter_trades_for_chart,
+    build_market_data_summary,
+    market_data_file_options,
+    market_data_option_label,
     prepare_trade_pnl_chart_data,
     preset_option_label,
+    validate_market_data_file,
 )
 
 
@@ -297,3 +301,69 @@ def test_export_comparison_rows_creates_csv(tmp_path):
     assert output_path == tmp_path / "app_preset_comparison.csv"
     assert output_path.exists()
     assert "tradeify_growth_50k" in output_path.read_text(encoding="utf-8")
+
+
+def test_market_data_file_options_lists_csv_files(tmp_path):
+    (tmp_path / "B.csv").write_text("x", encoding="utf-8")
+    (tmp_path / "A.csv").write_text("x", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("x", encoding="utf-8")
+
+    options = market_data_file_options(tmp_path)
+
+    assert options == [
+        str((tmp_path / "A.csv").as_posix()),
+        str((tmp_path / "B.csv").as_posix()),
+    ]
+
+
+def test_market_data_option_label_is_readable():
+    label = market_data_option_label("data/market_data/MNQ_1m.csv")
+
+    assert label == "MNQ_1m.csv (data/market_data)"
+
+
+def test_validate_market_data_file_returns_summary_for_valid_csv(tmp_path):
+    file_path = tmp_path / "sample.csv"
+    file_path.write_text(
+        "\n".join(
+            [
+                "DateTime,Open,High,Low,Close,Volume",
+                "2024-01-02 09:30:00,10,12,9,11,100",
+                "2024-01-02 09:31:00,11,13,10,12,120",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_market_data_file(str(file_path), symbol="NQ")
+
+    assert result["ok"] is True
+    assert result["summary"]["rows"] == 2
+    assert result["summary"]["symbols"] == "NQ"
+
+
+def test_validate_market_data_file_returns_error_for_invalid_csv(tmp_path):
+    file_path = tmp_path / "bad.csv"
+    file_path.write_text(
+        "\n".join(
+            [
+                "DateTime,Open,High,Low,Close",
+                "2024-01-02 09:30:00,10,9,8,11",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_market_data_file(str(file_path), symbol="NQ")
+
+    assert result["ok"] is False
+    assert "invalid ohlc" in result["error"].lower()
+
+
+def test_build_market_data_summary_handles_empty_dataframe():
+    ohlc = pd.DataFrame(columns=["DateTime", "Open", "High", "Low", "Close"])
+
+    summary = build_market_data_summary(ohlc, "empty.csv")
+
+    assert summary["file_path"] == "empty.csv"
+    assert summary["rows"] == 0
