@@ -342,6 +342,24 @@ def store_analysis_results(
         },
         "selected_strategy_name": controls.get("strategy_name"),
         "strategy_params": controls.get("strategy_params", {}),
+        "input_configuration": {
+            "market_data_path": controls.get("market_data_path"),
+            "symbol": controls.get("symbol"),
+            "point_value": controls.get("point_value"),
+            "time_filters": {
+                "strategy_start_time": controls.get("strategy_start_time"),
+                "strategy_end_time": controls.get("strategy_end_time"),
+                "force_close_time": controls.get("force_close_time"),
+            },
+            "cost_settings": {
+                "commission_per_side": controls.get("commission_per_side"),
+                "slippage_points": controls.get("slippage_points"),
+                "spread_points": controls.get("spread_points"),
+            },
+            "bankroll": controls.get("bankroll"),
+            "monte_carlo_runs": controls.get("monte_carlo_runs"),
+            "monte_carlo_max_accounts": controls.get("monte_carlo_max_accounts"),
+        },
         "risk_settings": {
             "stop_loss_points": controls.get("stop_loss_points"),
             "take_profit_points": controls.get("take_profit_points"),
@@ -388,65 +406,145 @@ def render_outputs(
     exported_files: dict[str, Path],
     analysis_state: dict[str, Any] | None = None,
 ) -> None:
-    (
-        overview_tab,
-        strategy_tab,
-        diagnostics_tab,
-        funding_tab,
-        bankroll_tab,
-        risk_tab,
-        trades_tab,
-        backtest_tab,
-    ) = st.tabs(
-        [
-            "Overview",
-            "Strategy",
-            "Diagnostics",
-            "Funding",
-            "Bankroll",
-            "Risk",
-            "Trades",
-            "Backtest",
-        ]
+    dashboard_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
+        ["Dashboard", "Backtest", "Funding & Risk", "Data"]
     )
 
-    with overview_tab:
-        st.subheader("Run Overview")
-        _metric_row(
-            [
-                ("Trades", strategy_metrics["total_trades"]),
-                ("Strategy Net PnL", _money(strategy_metrics["net_pnl"])),
-                ("Funding Net PnL", _money(business_metrics["net_business_pnl"])),
-                ("Total Net Payout", _money(business_metrics["total_net_payout"])),
-            ]
-        )
-        st.subheader("Exported Files")
-        for label, path in exported_files.items():
-            st.write(f"{label}: `{path}`")
-
-    with strategy_tab:
-        render_strategy_summary(strategy_metrics)
-        render_trade_pnl_charts(trades)
-
-    with diagnostics_tab:
-        render_diagnostics_tab(trades, strategy_metrics)
-
-    with funding_tab:
-        render_funding_summary(business_metrics)
-
-    with bankroll_tab:
-        render_bankroll_summary(bankroll_result)
-
-    with risk_tab:
-        render_risk_summary(risk_result, required_bankroll)
-        render_streak_summary(streak_analysis)
-
-    with trades_tab:
-        st.subheader("Generated Trades")
-        st.dataframe(trades.head(500), use_container_width=True)
-
+    state = analysis_state or {}
+    with dashboard_tab:
+        render_dashboard_tab(state)
     with backtest_tab:
-        render_backtest_trade_explorer(analysis_state or {})
+        render_backtest_tab(state)
+    with funding_risk_tab:
+        render_funding_risk_tab(state)
+    with data_tab:
+        render_data_tab(state)
+
+
+def render_dashboard_tab(analysis_state: dict[str, Any]) -> None:
+    strategy_metrics = analysis_state["strategy_metrics"]
+    business_metrics = analysis_state["business_metrics"]
+    bankroll_result = analysis_state.get("bankroll_result")
+    risk_result = analysis_state.get("risk_of_ruin_result")
+    final_bankroll = (
+        bankroll_result["metrics"]["final_bankroll"] if bankroll_result is not None else None
+    )
+    ruin_probability = (
+        risk_result["metrics"]["ruin_probability"] if risk_result is not None else None
+    )
+
+    st.subheader("Executive Summary")
+    render_metric_grid(
+        [
+            ("Total Trades", strategy_metrics["total_trades"]),
+            ("Strategy Net PnL", format_currency_compact(strategy_metrics["net_pnl"])),
+            ("Profit Factor", format_profit_factor(strategy_metrics["profit_factor"])),
+            ("Funding Net PnL", format_currency_compact(business_metrics["net_business_pnl"])),
+            ("ROI", format_percent(business_metrics["roi"])),
+            ("Final Bankroll", "N/A" if final_bankroll is None else format_currency_compact(final_bankroll)),
+            ("Risk of Ruin", "N/A" if ruin_probability is None else format_percent(ruin_probability)),
+        ],
+        columns_per_row=4,
+    )
+
+    st.subheader("Selected Setup")
+    setup_rows = _setup_summary_rows(analysis_state)
+    st.dataframe(pd.DataFrame(setup_rows), hide_index=True, use_container_width=True)
+
+    st.subheader("Main Warnings / Insights")
+    render_dashboard_insights(analysis_state)
+
+
+def render_dashboard_insights(analysis_state: dict[str, Any]) -> None:
+    diagnostics = build_trade_diagnostics(analysis_state["trades_df"])
+    strategy_metrics = analysis_state["strategy_metrics"]
+    bankroll_result = analysis_state.get("bankroll_result")
+    risk_result = analysis_state.get("risk_of_ruin_result")
+    warnings_count = 0
+
+    if strategy_metrics.get("total_trades", 0) < 30:
+        st.warning("Small sample size: strategy metrics may not be reliable.")
+        warnings_count += 1
+    if _numeric_value(strategy_metrics.get("profit_factor"), default=0.0) < 1:
+        st.warning("Profit factor below 1.0 indicates the strategy lost money after costs.")
+        warnings_count += 1
+    if diagnostics["overtrading"].get("average_trades_per_day", 0) > 20:
+        st.warning("High trading frequency detected. Costs may dominate results.")
+        warnings_count += 1
+    cost_ratio = diagnostics["costs"].get("cost_as_percent_of_gross_profit")
+    if cost_ratio is not None and cost_ratio > 0.5:
+        st.warning("High cost impact: costs consumed more than 50% of gross profit.")
+        warnings_count += 1
+    if bankroll_result is not None and bankroll_result["metrics"].get("bankroll_ruined"):
+        st.warning("Bankroll was ruined during the simulated business path.")
+        warnings_count += 1
+    if risk_result is not None and risk_result["metrics"].get("ruin_probability", 0) > 0.25:
+        st.warning("High risk of ruin detected in Monte Carlo analysis.")
+        warnings_count += 1
+    if warnings_count == 0:
+        st.success("No major dashboard warnings detected for this run.")
+
+
+def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
+    with st.expander("Trade Explorer", expanded=True):
+        render_backtest_trade_explorer(analysis_state)
+    with st.expander("PnL Charts", expanded=False):
+        render_trade_pnl_charts(analysis_state["trades_df"])
+    with st.expander("Trade Diagnostics", expanded=False):
+        render_diagnostics_tab(analysis_state["trades_df"], analysis_state["strategy_metrics"])
+    with st.expander("Trades Table", expanded=False):
+        render_filtered_trades_table(analysis_state["trades_df"])
+
+
+def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
+    with st.expander("Funding Results", expanded=True):
+        render_funding_summary(analysis_state["business_metrics"])
+    with st.expander("Bankroll", expanded=True):
+        render_bankroll_summary(analysis_state.get("bankroll_result"))
+    with st.expander("Risk of Ruin", expanded=False):
+        render_risk_summary(
+            analysis_state.get("risk_of_ruin_result"),
+            analysis_state.get("required_bankroll_result"),
+        )
+    with st.expander("Streak Analysis", expanded=False):
+        render_streak_summary(analysis_state["streak_analysis"])
+
+
+def render_data_tab(analysis_state: dict[str, Any]) -> None:
+    st.subheader("Input Configuration")
+    st.dataframe(
+        pd.DataFrame(_configuration_rows(analysis_state)),
+        hide_index=True,
+        use_container_width=True,
+    )
+
+    st.subheader("Generated Outputs")
+    exported_files = analysis_state.get("exported_files", {})
+    output_rows = [
+        {"Output": label, "Path": str(path), "Exists": Path(path).exists()}
+        for label, path in exported_files.items()
+    ]
+    st.dataframe(pd.DataFrame(output_rows), hide_index=True, use_container_width=True)
+
+    st.subheader("Raw Data Previews")
+    with st.expander("OHLC Preview", expanded=False):
+        st.dataframe(analysis_state["ohlc_df"].head(100), use_container_width=True)
+    with st.expander("Generated Trades Preview", expanded=False):
+        st.dataframe(analysis_state["trades_df"].head(100), use_container_width=True)
+    with st.expander("JSON Metrics", expanded=False):
+        st.json(
+            {
+                "strategy_metrics": analysis_state["strategy_metrics"],
+                "business_metrics": analysis_state["business_metrics"],
+                "bankroll_metrics": None
+                if analysis_state.get("bankroll_result") is None
+                else analysis_state["bankroll_result"]["metrics"],
+                "risk_of_ruin_metrics": None
+                if analysis_state.get("risk_of_ruin_result") is None
+                else analysis_state["risk_of_ruin_result"]["metrics"],
+                "streak_analysis": analysis_state["streak_analysis"],
+            }
+        )
 
 
 def render_strategy_summary(strategy_metrics: dict[str, Any]) -> None:
@@ -912,6 +1010,106 @@ def render_trade_explorer_filters(trades: pd.DataFrame) -> dict[str, Any]:
         "minimum_net_pnl": minimum_net_pnl,
         "maximum_net_pnl": maximum_net_pnl,
     }
+
+
+def render_filtered_trades_table(trades_df: pd.DataFrame) -> None:
+    if trades_df.empty:
+        st.info("No generated trades available.")
+        return
+
+    trades = prepare_trades_for_explorer(trades_df)
+    filters = render_trade_table_filters(trades)
+    filtered = filter_trades_for_explorer(trades, filters)
+    if filtered.empty:
+        st.warning("No trades match the selected filters.")
+        return
+
+    display_columns = [
+        column
+        for column in [
+            "TradeID",
+            "EntryTime",
+            "ExitTime",
+            "Direction",
+            "EntryPrice",
+            "ExitPrice",
+            "NetPnL",
+            "ExitReason",
+            "PhaseProfile",
+            "StrategyName",
+        ]
+        if column in filtered.columns
+    ]
+    st.dataframe(filtered[display_columns].head(1000), use_container_width=True)
+
+
+def render_trade_table_filters(trades: pd.DataFrame) -> dict[str, Any]:
+    filter_cols = st.columns(4)
+    with filter_cols[0]:
+        direction_filter = st.selectbox(
+            "Table direction",
+            options=["All", "Long", "Short"],
+            key="table_direction_filter",
+        )
+    exit_reasons = ["All"]
+    if "ExitReason" in trades.columns:
+        exit_reasons.extend(sorted(str(value) for value in trades["ExitReason"].dropna().unique()))
+    with filter_cols[1]:
+        exit_reason_filter = st.selectbox(
+            "Table ExitReason",
+            options=exit_reasons,
+            key="table_exit_reason_filter",
+        )
+    phase_options = ["All"]
+    if "PhaseProfile" in trades.columns:
+        phase_options.extend(sorted(str(value) for value in trades["PhaseProfile"].dropna().unique()))
+    with filter_cols[2]:
+        phase_filter = st.selectbox(
+            "Table PhaseProfile",
+            options=phase_options,
+            key="table_phase_filter",
+        )
+    with filter_cols[3]:
+        selected_date = st.selectbox(
+            "Table entry date",
+            options=_trade_entry_date_options(trades),
+            key="table_date_filter",
+        )
+
+    min_pnl = float(trades["NetPnL"].min()) if "NetPnL" in trades.columns else 0.0
+    max_pnl = float(trades["NetPnL"].max()) if "NetPnL" in trades.columns else 0.0
+    pnl_cols = st.columns(2)
+    with pnl_cols[0]:
+        minimum_net_pnl = st.number_input(
+            "Table minimum NetPnL",
+            value=min_pnl,
+            key="table_min_net_pnl",
+        )
+    with pnl_cols[1]:
+        maximum_net_pnl = st.number_input(
+            "Table maximum NetPnL",
+            value=max_pnl,
+            key="table_max_net_pnl",
+        )
+
+    return {
+        "direction": direction_filter,
+        "exit_reason": exit_reason_filter,
+        "phase_profile": phase_filter,
+        "entry_date": selected_date,
+        "minimum_net_pnl": minimum_net_pnl,
+        "maximum_net_pnl": maximum_net_pnl,
+    }
+
+
+def _trade_entry_date_options(trades: pd.DataFrame) -> list[str]:
+    date_values = ["All dates"]
+    if "EntryTime" in trades.columns:
+        date_values.extend(
+            str(value)
+            for value in sorted(trades["EntryTime"].dt.date.dropna().unique())
+        )
+    return date_values
 
 
 def prepare_trades_for_explorer(trades_df: pd.DataFrame) -> pd.DataFrame:
@@ -1801,6 +1999,61 @@ def _format_diagnostic_money_columns(
         if column in formatted.columns:
             formatted[column] = formatted[column].apply(format_currency_full)
     return formatted
+
+
+def _setup_summary_rows(analysis_state: dict[str, Any]) -> list[dict[str, Any]]:
+    preset = analysis_state.get("selected_preset", {})
+    input_config = analysis_state.get("input_configuration", {})
+    risk_settings = analysis_state.get("risk_settings", {})
+    return [
+        {"Field": "Company", "Value": preset.get("company")},
+        {"Field": "Plan", "Value": preset.get("plan")},
+        {"Field": "Account size", "Value": format_account_size(preset.get("account_size"))},
+        {"Field": "Strategy", "Value": analysis_state.get("selected_strategy_name")},
+        {"Field": "Symbol", "Value": input_config.get("symbol")},
+        {"Field": "Point value", "Value": input_config.get("point_value")},
+        {"Field": "Contracts", "Value": risk_settings.get("contracts")},
+        {
+            "Field": "SL / TP",
+            "Value": f"{risk_settings.get('stop_loss_points')} / {risk_settings.get('take_profit_points')}",
+        },
+        {"Field": "Bankroll", "Value": input_config.get("bankroll")},
+    ]
+
+
+def _configuration_rows(analysis_state: dict[str, Any]) -> list[dict[str, Any]]:
+    preset = analysis_state.get("selected_preset", {})
+    input_config = analysis_state.get("input_configuration", {})
+    rows = [
+        {"Setting": "Market data path", "Value": input_config.get("market_data_path")},
+        {"Setting": "Preset ID", "Value": preset.get("preset_id")},
+        {"Setting": "Company", "Value": preset.get("company")},
+        {"Setting": "Plan", "Value": preset.get("plan")},
+        {"Setting": "Account size", "Value": preset.get("account_size")},
+        {"Setting": "Strategy", "Value": analysis_state.get("selected_strategy_name")},
+    ]
+    rows.extend(_dict_rows("Strategy", analysis_state.get("strategy_params", {})))
+    rows.extend(_dict_rows("Risk", analysis_state.get("risk_settings", {})))
+    rows.extend(_dict_rows("Costs", input_config.get("cost_settings", {})))
+    rows.extend(_dict_rows("Time", input_config.get("time_filters", {})))
+    rows.extend(
+        [
+            {"Setting": "Bankroll", "Value": input_config.get("bankroll")},
+            {"Setting": "Monte Carlo runs", "Value": input_config.get("monte_carlo_runs")},
+            {
+                "Setting": "Monte Carlo max accounts",
+                "Value": input_config.get("monte_carlo_max_accounts"),
+            },
+        ]
+    )
+    return rows
+
+
+def _dict_rows(prefix: str, values: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {"Setting": f"{prefix}: {key}", "Value": value}
+        for key, value in values.items()
+    ]
 
 
 def _optional_decimal(value: Any) -> str:
