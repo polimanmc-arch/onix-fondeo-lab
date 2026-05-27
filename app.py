@@ -371,6 +371,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         if not comparison_rows:
             st.warning("No runnable presets were available for comparison.")
     account_event_timeline = build_account_event_timeline(results)
+    account_summary = build_account_summary(results)
 
     exported_files = export_app_outputs(
         trades,
@@ -398,6 +399,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         comparison_rows,
         market_data_summary,
         account_event_timeline,
+        account_summary,
     )
 
 
@@ -894,6 +896,41 @@ def build_account_event_timeline(results: dict[str, Any]) -> list[dict[str, Any]
     return rows
 
 
+def build_account_summary(results: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for account in results.get("accounts", []):
+        payouts = account.payouts
+        total_gross_payout = sum(payout.gross_payout for payout in payouts)
+        total_net_payout = sum(payout.net_payout for payout in payouts)
+        rows.append(
+            {
+                "AccountID": account.account_id,
+                "Phase": account.phase,
+                "Status": account.status,
+                "FinalPnL": account.pnl,
+                "HighWatermark": account.high_watermark,
+                "TradingDays": len(account.trading_days),
+                "TradesCount": account.trades_count,
+                "StartedAt": account.started_at,
+                "EndedAt": account.ended_at,
+                "ResultReason": account.result_reason,
+                "PayoutsCount": len(payouts),
+                "TotalGrossPayout": total_gross_payout,
+                "TotalNetPayout": total_net_payout,
+                "DrawdownFloor": account.trailing_drawdown_floor,
+                "EODHighPnL": account.eod_high_pnl,
+                "DrawdownLocked": account.drawdown_locked,
+            }
+        )
+    return sorted(
+        rows,
+        key=lambda row: (
+            row["AccountID"],
+            0 if row["Phase"] == "EVALUATION" else 1,
+        ),
+    )
+
+
 def account_timeline_row(
     time: Any,
     account_id: Any,
@@ -991,6 +1028,7 @@ def store_analysis_results(
     comparison_rows: list[dict[str, Any]] | None = None,
     market_data_summary: dict[str, Any] | None = None,
     account_event_timeline: list[dict[str, Any]] | None = None,
+    account_summary: list[dict[str, Any]] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -1005,6 +1043,7 @@ def store_analysis_results(
         "comparison_rows": comparison_rows or [],
         "market_data_summary": market_data_summary,
         "account_event_timeline": account_event_timeline or [],
+        "account_summary": account_summary or [],
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -1282,6 +1321,8 @@ def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
 def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
     with st.expander("Funding Results", expanded=True):
         render_funding_summary(analysis_state["business_metrics"])
+    with st.expander("Account Summary", expanded=True):
+        render_account_summary(analysis_state.get("account_summary", []))
     with st.expander("Account Event Timeline", expanded=True):
         render_account_event_timeline(analysis_state.get("account_event_timeline", []))
     with st.expander("Bankroll", expanded=True):
@@ -1350,6 +1391,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
                 "business_metrics": analysis_state["business_metrics"],
                 "comparison_rows": comparison_rows,
                 "market_data_summary": market_data_summary,
+                "account_summary": analysis_state.get("account_summary", []),
                 "account_event_timeline": analysis_state.get("account_event_timeline", []),
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
@@ -1446,6 +1488,98 @@ def render_funding_summary(business_metrics: dict[str, Any]) -> None:
             ("ROI", f"{business_metrics['roi']:.2%}"),
         ]
     )
+
+
+def render_account_summary(account_rows: list[dict[str, Any]]) -> None:
+    if not account_rows:
+        st.info("No account summary is available for this run.")
+        return
+
+    summary = account_summary_dataframe(account_rows)
+    columns = st.columns(3)
+    phase_options = ["All"] + sorted(summary["Phase"].dropna().astype(str).unique())
+    status_options = ["All"] + sorted(summary["Status"].dropna().astype(str).unique())
+    selected_phase = columns[0].selectbox(
+        "Phase",
+        options=phase_options,
+        key="account_summary_phase_filter",
+    )
+    selected_status = columns[1].selectbox(
+        "Status",
+        options=status_options,
+        key="account_summary_status_filter",
+    )
+    show_active_only = columns[2].checkbox(
+        "Active only",
+        value=False,
+        key="account_summary_active_only",
+    )
+
+    filtered = summary.copy()
+    if selected_phase != "All":
+        filtered = filtered[filtered["Phase"].astype(str) == selected_phase]
+    if selected_status != "All":
+        filtered = filtered[filtered["Status"].astype(str) == selected_status]
+    if show_active_only:
+        filtered = filtered[filtered["Status"].astype(str) == "ACTIVE"]
+
+    st.dataframe(
+        format_account_summary_dataframe(filtered),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download account summary CSV",
+        data=summary.to_csv(index=False),
+        file_name="account_summary_streamlit.csv",
+        mime="text/csv",
+    )
+
+
+def account_summary_dataframe(account_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    columns = [
+        "AccountID",
+        "Phase",
+        "Status",
+        "FinalPnL",
+        "HighWatermark",
+        "TradingDays",
+        "TradesCount",
+        "StartedAt",
+        "EndedAt",
+        "ResultReason",
+        "PayoutsCount",
+        "TotalGrossPayout",
+        "TotalNetPayout",
+        "DrawdownFloor",
+        "EODHighPnL",
+        "DrawdownLocked",
+    ]
+    return pd.DataFrame(account_rows, columns=columns)
+
+
+def format_account_summary_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    formatted = dataframe.copy()
+    for column in [
+        "FinalPnL",
+        "HighWatermark",
+        "TotalGrossPayout",
+        "TotalNetPayout",
+        "DrawdownFloor",
+        "EODHighPnL",
+    ]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(
+                lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
+            )
+    for column in ["StartedAt", "EndedAt"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(_optional_datetime)
+    if "DrawdownLocked" in formatted.columns:
+        formatted["DrawdownLocked"] = formatted["DrawdownLocked"].apply(
+            lambda value: "Yes" if bool(value) else "No"
+        )
+    return formatted
 
 
 def render_account_event_timeline(timeline_rows: list[dict[str, Any]]) -> None:

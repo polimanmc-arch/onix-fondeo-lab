@@ -22,7 +22,10 @@ from app import (
     build_account_event_timeline,
     build_preset_rules_summary,
     account_event_timeline_dataframe,
+    account_summary_dataframe,
+    build_account_summary,
     format_account_event_timeline_dataframe,
+    format_account_summary_dataframe,
     current_controls_snapshot,
     format_rule_value,
     load_app_setup,
@@ -554,3 +557,75 @@ def test_account_event_timeline_dataframe_uses_expected_columns():
 
     assert dataframe.columns.tolist()[0:5] == ["Step", "Time", "AccountID", "Phase", "EventType"]
     assert formatted.loc[0, "Amount"] == "-$87.00"
+
+
+def test_build_account_summary_creates_rows_per_account_phase():
+    payout = SimpleNamespace(gross_payout=1000, net_payout=900)
+    evaluation_account = SimpleNamespace(
+        account_id=1,
+        phase="EVALUATION",
+        status="PASSED",
+        pnl=3000,
+        high_watermark=3000,
+        trading_days={1, 2},
+        trades_count=10,
+        started_at=None,
+        ended_at="2024-01-02 10:00:00",
+        result_reason="Profit target reached",
+        payouts=[],
+        trailing_drawdown_floor=-1000,
+        eod_high_pnl=3000,
+        drawdown_locked=False,
+    )
+    funded_account = SimpleNamespace(
+        account_id=1,
+        phase="FUNDED",
+        status="ACTIVE",
+        pnl=500,
+        high_watermark=1200,
+        trading_days={3},
+        trades_count=4,
+        started_at="2024-01-02 10:00:00",
+        ended_at=None,
+        result_reason=None,
+        payouts=[payout],
+        trailing_drawdown_floor=-800,
+        eod_high_pnl=1200,
+        drawdown_locked=True,
+    )
+
+    rows = build_account_summary({"accounts": [funded_account, evaluation_account]})
+
+    assert [row["Phase"] for row in rows] == ["EVALUATION", "FUNDED"]
+    assert rows[1]["PayoutsCount"] == 1
+    assert rows[1]["TotalNetPayout"] == 900
+
+
+def test_account_summary_dataframe_formats_money_and_flags():
+    rows = [
+        {
+            "AccountID": 1,
+            "Phase": "FUNDED",
+            "Status": "ACTIVE",
+            "FinalPnL": 500,
+            "HighWatermark": 1200,
+            "TradingDays": 1,
+            "TradesCount": 4,
+            "StartedAt": "2024-01-02 10:00:00",
+            "EndedAt": None,
+            "ResultReason": None,
+            "PayoutsCount": 1,
+            "TotalGrossPayout": 1000,
+            "TotalNetPayout": 900,
+            "DrawdownFloor": -800,
+            "EODHighPnL": 1200,
+            "DrawdownLocked": True,
+        }
+    ]
+
+    dataframe = account_summary_dataframe(rows)
+    formatted = format_account_summary_dataframe(dataframe)
+
+    assert dataframe.columns.tolist()[0:5] == ["AccountID", "Phase", "Status", "FinalPnL", "HighWatermark"]
+    assert formatted.loc[0, "FinalPnL"] == "$500.00"
+    assert formatted.loc[0, "DrawdownLocked"] == "Yes"
