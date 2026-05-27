@@ -40,6 +40,7 @@ from onix_fondeo.streaks import calculate_streak_analysis
 
 OUTPUT_DIR = Path("data/output")
 MARKET_DATA_DIR = Path("data/market_data")
+APP_SETUPS_DIR = Path("data/app_setups")
 CUSTOM_MARKET_DATA_OPTION = "Custom path..."
 DEFAULT_PRESET_COMPANY = "Lucid Trading"
 DEFAULT_PRESET_PLAN = "LucidFlex"
@@ -69,21 +70,36 @@ def main() -> None:
 
 def sidebar_controls() -> dict[str, Any]:
     with st.sidebar:
+        render_setup_loader()
+
         st.header("Market Data")
-        symbol = st.text_input("Symbol", value="NQ")
-        point_value = st.number_input("Point value", min_value=0.0, value=20.0)
+        symbol = st.text_input("Symbol", value="NQ", key="market_symbol")
+        point_value = st.number_input(
+            "Point value",
+            min_value=0.0,
+            value=20.0,
+            key="point_value",
+        )
         market_data_path = market_data_file_selector()
         render_market_data_validator(market_data_path, symbol)
 
         st.header("Funding Preset")
         presets = list_presets()
-        show_non_runnable = st.checkbox("Show non-runnable presets", value=False)
+        show_non_runnable = st.checkbox(
+            "Show non-runnable presets",
+            value=False,
+            key="show_non_runnable_presets",
+        )
         filtered_presets = filter_presets_by_runnable(presets, show_non_runnable)
         selected_preset = select_funding_preset(filtered_presets)
         selected_preset_id = selected_preset["preset_id"]
         selected_preset_runnable = selected_preset["is_runnable"]
         render_selected_preset_info(selected_preset)
-        comparison_enabled = st.checkbox("Compare multiple presets", value=False)
+        comparison_enabled = st.checkbox(
+            "Compare multiple presets",
+            value=False,
+            key="comparison_enabled",
+        )
         comparison_preset_ids = []
         if comparison_enabled:
             runnable_presets = filter_presets_by_runnable(presets, show_non_runnable=False)
@@ -91,15 +107,22 @@ def sidebar_controls() -> dict[str, Any]:
                 preset_option_label(preset): preset["preset_id"]
                 for preset in runnable_presets
             }
+            loaded_comparison_ids = st.session_state.pop("loaded_comparison_preset_ids", None)
+            default_comparison_ids = loaded_comparison_ids or [selected_preset_id]
             default_labels = [
                 label
                 for label, preset_id in comparison_options.items()
-                if preset_id == selected_preset_id
+                if preset_id in default_comparison_ids
             ]
+            if (
+                "comparison_preset_labels" not in st.session_state
+                or loaded_comparison_ids is not None
+            ):
+                st.session_state["comparison_preset_labels"] = default_labels
             selected_comparison_labels = st.multiselect(
                 "Presets to compare",
                 options=list(comparison_options),
-                default=default_labels,
+                key="comparison_preset_labels",
                 help="Uses the same generated trades for every selected runnable preset.",
             )
             comparison_preset_ids = [
@@ -113,27 +136,47 @@ def sidebar_controls() -> dict[str, Any]:
             "Strategy",
             options=["random", "stochastic"],
             index=1,
+            key="strategy_name",
         )
         strategy_params = _strategy_controls(strategy_name)
 
         st.header("Time Filters")
-        strategy_start_time = st.text_input("Strategy start time", value="09:45")
-        strategy_end_time = st.text_input("Strategy end time", value="16:00")
-        force_close_time = st.text_input("Force close time", value="16:00")
+        strategy_start_time = st.text_input(
+            "Strategy start time",
+            value="09:45",
+            key="strategy_start_time",
+        )
+        strategy_end_time = st.text_input(
+            "Strategy end time",
+            value="16:00",
+            key="strategy_end_time",
+        )
+        force_close_time = st.text_input(
+            "Force close time",
+            value="16:00",
+            key="force_close_time",
+        )
 
         st.header("Risk Settings")
-        contracts = st.number_input("Contracts", min_value=0.0, value=1.0)
-        stop_loss_points = st.number_input("Stop loss points", min_value=0.0, value=70.0)
+        contracts = st.number_input("Contracts", min_value=0.0, value=1.0, key="contracts")
+        stop_loss_points = st.number_input(
+            "Stop loss points",
+            min_value=0.0,
+            value=70.0,
+            key="stop_loss_points",
+        )
         take_profit_points = st.number_input(
             "Take profit points",
             min_value=0.0,
             value=50.0,
+            key="take_profit_points",
         )
         max_holding_minutes = st.number_input(
             "Max holding minutes",
             min_value=1,
             value=60,
             step=1,
+            key="max_holding_minutes",
         )
 
         st.header("Costs")
@@ -141,24 +184,39 @@ def sidebar_controls() -> dict[str, Any]:
             "Commission per side",
             min_value=0.0,
             value=0.0,
+            key="commission_per_side",
         )
-        slippage_points = st.number_input("Slippage points", min_value=0.0, value=0.0)
-        spread_points = st.number_input("Spread points", min_value=0.0, value=0.0)
+        slippage_points = st.number_input(
+            "Slippage points",
+            min_value=0.0,
+            value=0.0,
+            key="slippage_points",
+        )
+        spread_points = st.number_input(
+            "Spread points",
+            min_value=0.0,
+            value=0.0,
+            key="spread_points",
+        )
 
         st.header("Bankroll / Risk")
-        bankroll = st.number_input("Bankroll", min_value=0.0, value=3000.0)
+        bankroll = st.number_input("Bankroll", min_value=0.0, value=3000.0, key="bankroll")
         monte_carlo_runs = st.number_input(
             "Monte Carlo runs",
             min_value=0,
             value=100,
             step=100,
+            key="monte_carlo_runs",
         )
         monte_carlo_max_accounts = st.number_input(
             "Monte Carlo max accounts",
             min_value=1,
             value=100,
             step=1,
+            key="monte_carlo_max_accounts",
         )
+
+        render_setup_saver(current_controls_snapshot(locals()))
 
         run_analysis_button = st.button(
             "Run Analysis",
@@ -201,20 +259,36 @@ def _strategy_controls(strategy_name: str) -> dict[str, Any]:
                 max_value=1.0,
                 value=0.005,
                 format="%.4f",
+                key="random_probability",
             ),
-            "seed": st.number_input("Random seed", value=42, step=1),
+            "seed": st.number_input("Random seed", value=42, step=1, key="random_seed"),
         }
 
     return {
-        "period_k": st.number_input("PeriodK", min_value=1, value=20, step=1),
-        "period_d": st.number_input("PeriodD", min_value=1, value=5, step=1),
-        "smooth": st.number_input("Smooth", min_value=1, value=3, step=1),
-        "oversold": st.number_input("Oversold", min_value=0.0, value=20.0),
-        "overbought": st.number_input("Overbought", min_value=0.0, value=80.0),
-        "signal_mode": st.selectbox("Signal mode", options=["cross", "zone"], index=0),
-        "use_d_confirmation": st.checkbox("Use D confirmation", value=False),
-        "min_k_d_gap": st.number_input("Min K/D gap", min_value=0.0, value=0.0),
-        "cooldown_bars": st.number_input("Cooldown bars", min_value=0, value=0, step=1),
+        "period_k": st.number_input("PeriodK", min_value=1, value=20, step=1, key="stoch_period_k"),
+        "period_d": st.number_input("PeriodD", min_value=1, value=5, step=1, key="stoch_period_d"),
+        "smooth": st.number_input("Smooth", min_value=1, value=3, step=1, key="stoch_smooth"),
+        "oversold": st.number_input("Oversold", min_value=0.0, value=20.0, key="stoch_oversold"),
+        "overbought": st.number_input("Overbought", min_value=0.0, value=80.0, key="stoch_overbought"),
+        "signal_mode": st.selectbox(
+            "Signal mode",
+            options=["cross", "zone"],
+            index=0,
+            key="stoch_signal_mode",
+        ),
+        "use_d_confirmation": st.checkbox(
+            "Use D confirmation",
+            value=False,
+            key="stoch_use_d_confirmation",
+        ),
+        "min_k_d_gap": st.number_input("Min K/D gap", min_value=0.0, value=0.0, key="stoch_min_k_d_gap"),
+        "cooldown_bars": st.number_input(
+            "Cooldown bars",
+            min_value=0,
+            value=0,
+            step=1,
+            key="stoch_cooldown_bars",
+        ),
     }
 
 
@@ -349,19 +423,194 @@ def build_strategy(controls: dict[str, Any]):
     )
 
 
+def render_setup_loader() -> None:
+    st.header("Setups")
+    with st.expander("Load saved setup", expanded=False):
+        setup_paths = saved_setup_files()
+        if not setup_paths:
+            st.info("No saved setups yet.")
+            return
+        selected_path = st.selectbox(
+            "Saved setup",
+            options=setup_paths,
+            format_func=lambda path: path.stem,
+            key="saved_setup_path",
+        )
+        columns = st.columns(2)
+        if columns[0].button("Load setup"):
+            setup = load_app_setup(selected_path)
+            apply_setup_to_session_state(setup)
+            st.success(f"Loaded setup: {selected_path.stem}")
+            st.rerun()
+        if columns[1].button("Delete setup"):
+            selected_path.unlink(missing_ok=True)
+            st.warning(f"Deleted setup: {selected_path.stem}")
+            st.rerun()
+
+
+def render_setup_saver(controls_snapshot: dict[str, Any]) -> None:
+    with st.expander("Save current setup", expanded=False):
+        setup_name = st.text_input("Setup name", value="", key="setup_save_name")
+        if st.button("Save setup"):
+            if not setup_name.strip():
+                st.warning("Enter a setup name before saving.")
+                return
+            output_path = save_app_setup(setup_name, controls_snapshot)
+            st.success(f"Saved setup: {output_path.name}")
+
+
+def current_controls_snapshot(local_values: dict[str, Any]) -> dict[str, Any]:
+    bankroll = local_values.get("bankroll")
+    return {
+        "version": 1,
+        "market_data_path": local_values.get("market_data_path"),
+        "symbol": local_values.get("symbol"),
+        "point_value": local_values.get("point_value"),
+        "preset_id": local_values.get("selected_preset_id"),
+        "comparison_enabled": local_values.get("comparison_enabled"),
+        "comparison_preset_ids": local_values.get("comparison_preset_ids", []),
+        "strategy_name": local_values.get("strategy_name"),
+        "strategy_params": local_values.get("strategy_params", {}),
+        "strategy_start_time": _blank_to_none(local_values.get("strategy_start_time")),
+        "strategy_end_time": _blank_to_none(local_values.get("strategy_end_time")),
+        "force_close_time": _blank_to_none(local_values.get("force_close_time")),
+        "contracts": local_values.get("contracts"),
+        "stop_loss_points": local_values.get("stop_loss_points"),
+        "take_profit_points": local_values.get("take_profit_points"),
+        "max_holding_minutes": int(local_values.get("max_holding_minutes", 60)),
+        "commission_per_side": local_values.get("commission_per_side"),
+        "slippage_points": local_values.get("slippage_points"),
+        "spread_points": local_values.get("spread_points"),
+        "bankroll": bankroll if bankroll and bankroll > 0 else None,
+        "monte_carlo_runs": int(local_values.get("monte_carlo_runs", 0)),
+        "monte_carlo_max_accounts": int(local_values.get("monte_carlo_max_accounts", 100)),
+    }
+
+
+def saved_setup_files(directory: Path = APP_SETUPS_DIR) -> list[Path]:
+    if not directory.exists():
+        return []
+    return sorted(directory.glob("*.json"), key=lambda path: path.stem.lower())
+
+
+def save_app_setup(
+    setup_name: str,
+    controls_snapshot: dict[str, Any],
+    directory: Path = APP_SETUPS_DIR,
+) -> Path:
+    directory.mkdir(parents=True, exist_ok=True)
+    output_path = directory / f"{slugify_setup_name(setup_name)}.json"
+    with output_path.open("w", encoding="utf-8") as file:
+        json.dump(controls_snapshot, file, indent=2, default=str)
+    return output_path
+
+
+def load_app_setup(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def apply_setup_to_session_state(setup: dict[str, Any]) -> None:
+    market_data_path = setup.get("market_data_path")
+    if market_data_path:
+        file_options = market_data_file_options()
+        if market_data_path in file_options:
+            st.session_state["market_data_file_option"] = market_data_path
+        else:
+            st.session_state["market_data_file_option"] = CUSTOM_MARKET_DATA_OPTION
+            st.session_state["custom_market_data_path"] = market_data_path
+
+    direct_widget_values = {
+        "market_symbol": setup.get("symbol"),
+        "point_value": setup.get("point_value"),
+        "comparison_enabled": setup.get("comparison_enabled"),
+        "strategy_name": setup.get("strategy_name"),
+        "strategy_start_time": setup.get("strategy_start_time") or "",
+        "strategy_end_time": setup.get("strategy_end_time") or "",
+        "force_close_time": setup.get("force_close_time") or "",
+        "contracts": setup.get("contracts"),
+        "stop_loss_points": setup.get("stop_loss_points"),
+        "take_profit_points": setup.get("take_profit_points"),
+        "max_holding_minutes": setup.get("max_holding_minutes"),
+        "commission_per_side": setup.get("commission_per_side"),
+        "slippage_points": setup.get("slippage_points"),
+        "spread_points": setup.get("spread_points"),
+        "bankroll": setup.get("bankroll") or 0.0,
+        "monte_carlo_runs": setup.get("monte_carlo_runs"),
+        "monte_carlo_max_accounts": setup.get("monte_carlo_max_accounts"),
+    }
+    for key, value in direct_widget_values.items():
+        if value is not None:
+            st.session_state[key] = value
+
+    apply_strategy_params_to_session_state(setup.get("strategy_params", {}))
+    apply_preset_to_session_state(setup.get("preset_id"))
+    st.session_state["loaded_comparison_preset_ids"] = setup.get(
+        "comparison_preset_ids",
+        [],
+    )
+
+
+def apply_strategy_params_to_session_state(strategy_params: dict[str, Any]) -> None:
+    mapping = {
+        "probability": "random_probability",
+        "seed": "random_seed",
+        "period_k": "stoch_period_k",
+        "period_d": "stoch_period_d",
+        "smooth": "stoch_smooth",
+        "oversold": "stoch_oversold",
+        "overbought": "stoch_overbought",
+        "signal_mode": "stoch_signal_mode",
+        "use_d_confirmation": "stoch_use_d_confirmation",
+        "min_k_d_gap": "stoch_min_k_d_gap",
+        "cooldown_bars": "stoch_cooldown_bars",
+    }
+    for param_name, widget_key in mapping.items():
+        if param_name in strategy_params:
+            st.session_state[widget_key] = strategy_params[param_name]
+
+
+def apply_preset_to_session_state(preset_id: str | None) -> None:
+    if not preset_id:
+        return
+    try:
+        preset = load_preset(preset_id)
+    except ValueError:
+        return
+    st.session_state["preset_company"] = preset.get("company") or DEFAULT_PRESET_COMPANY
+    st.session_state["preset_plan"] = preset.get("plan") or DEFAULT_PRESET_PLAN
+    st.session_state["preset_account_size"] = preset.get("account_size") or DEFAULT_PRESET_ACCOUNT_SIZE
+
+
+def slugify_setup_name(name: str) -> str:
+    slug = "".join(
+        character.lower() if character.isalnum() else "_"
+        for character in name.strip()
+    ).strip("_")
+    while "__" in slug:
+        slug = slug.replace("__", "_")
+    return slug or "setup"
+
+
 def market_data_file_selector() -> str:
     file_options = market_data_file_options()
     default_path = str(MARKET_DATA_DIR / "sample_NQ_1m.csv")
     default_option = default_path if default_path in file_options else CUSTOM_MARKET_DATA_OPTION
     options = file_options + [CUSTOM_MARKET_DATA_OPTION]
+    _ensure_widget_choice("market_data_file_option", options, default_option)
     selected_option = st.selectbox(
         "OHLC file",
         options=options,
         index=_default_index(options, default_option),
         format_func=market_data_option_label,
+        key="market_data_file_option",
     )
     if selected_option == CUSTOM_MARKET_DATA_OPTION:
-        return st.text_input("Custom OHLC CSV path", value=default_path)
+        return st.text_input(
+            "Custom OHLC CSV path",
+            value=default_path,
+            key="custom_market_data_path",
+        )
     st.caption(selected_option)
     return selected_option
 
@@ -2236,10 +2485,12 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No preset companies are available.")
         st.stop()
 
+    _ensure_widget_choice("preset_company", companies, DEFAULT_PRESET_COMPANY)
     selected_company = st.selectbox(
         "Company",
         options=companies,
         index=_default_index(companies, DEFAULT_PRESET_COMPANY),
+        key="preset_company",
     )
     company_presets = [
         preset for preset in presets if (preset.get("company") or "Unknown") == selected_company
@@ -2250,10 +2501,12 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No plans are available for the selected company.")
         st.stop()
 
+    _ensure_widget_choice("preset_plan", plans, DEFAULT_PRESET_PLAN)
     selected_plan = st.selectbox(
         "Plan",
         options=plans,
         index=_default_index(plans, DEFAULT_PRESET_PLAN),
+        key="preset_plan",
     )
     plan_presets = [
         preset for preset in company_presets if (preset.get("plan") or "Unknown") == selected_plan
@@ -2271,11 +2524,13 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
         st.error("No account sizes are available for the selected plan.")
         st.stop()
 
+    _ensure_widget_choice("preset_account_size", sizes, DEFAULT_PRESET_ACCOUNT_SIZE)
     selected_size = st.selectbox(
         "Account Size",
         options=sizes,
         index=_default_index(sizes, DEFAULT_PRESET_ACCOUNT_SIZE),
         format_func=format_account_size,
+        key="preset_account_size",
     )
     matches = [
         preset
@@ -2327,6 +2582,14 @@ def _default_index(options: list[Any], preferred_value: Any) -> int:
         return options.index(preferred_value)
     except ValueError:
         return 0
+
+
+def _ensure_widget_choice(key: str, options: list[Any], preferred_value: Any) -> None:
+    if not options:
+        return
+    if st.session_state.get(key) in options:
+        return
+    st.session_state[key] = preferred_value if preferred_value in options else options[0]
 
 
 def _metric_row(items: list[tuple[str, Any]]) -> None:

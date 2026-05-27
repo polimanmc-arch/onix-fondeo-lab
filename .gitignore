@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 data/output/
+data/app_setups/*.json
 .DS_Store
 .vscode/
 

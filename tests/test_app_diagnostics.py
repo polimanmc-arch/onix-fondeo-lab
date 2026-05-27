@@ -18,10 +18,14 @@ from app import (
     filter_trades_for_explorer,
     filter_trades_for_chart,
     build_market_data_summary,
+    current_controls_snapshot,
+    load_app_setup,
     market_data_file_options,
     market_data_option_label,
     prepare_trade_pnl_chart_data,
     preset_option_label,
+    save_app_setup,
+    slugify_setup_name,
     validate_market_data_file,
 )
 
@@ -367,3 +371,54 @@ def test_build_market_data_summary_handles_empty_dataframe():
 
     assert summary["file_path"] == "empty.csv"
     assert summary["rows"] == 0
+
+
+def test_slugify_setup_name_creates_safe_filename_stem():
+    assert slugify_setup_name("MNQ Growth 50K / Morning") == "mnq_growth_50k_morning"
+
+
+def test_save_and_load_app_setup_round_trip(tmp_path):
+    setup = {
+        "version": 1,
+        "market_data_path": "data/market_data/sample_NQ_1m.csv",
+        "symbol": "NQ",
+        "preset_id": "tradeify_growth_50k",
+    }
+
+    output_path = save_app_setup("My Setup", setup, tmp_path)
+    loaded = load_app_setup(output_path)
+
+    assert output_path == tmp_path / "my_setup.json"
+    assert loaded == setup
+
+
+def test_current_controls_snapshot_captures_reproducible_setup():
+    snapshot = current_controls_snapshot(
+        {
+            "market_data_path": "data/market_data/sample_NQ_1m.csv",
+            "symbol": "NQ",
+            "point_value": 20.0,
+            "selected_preset_id": "lucid_trading_lucidflex_50k",
+            "comparison_enabled": False,
+            "comparison_preset_ids": [],
+            "strategy_name": "stochastic",
+            "strategy_params": {"period_k": 20, "period_d": 5},
+            "strategy_start_time": "09:45",
+            "strategy_end_time": "16:00",
+            "force_close_time": "16:00",
+            "contracts": 1,
+            "stop_loss_points": 70,
+            "take_profit_points": 50,
+            "max_holding_minutes": 60,
+            "commission_per_side": 1.24,
+            "slippage_points": 0.25,
+            "spread_points": 0.25,
+            "bankroll": 3000,
+            "monte_carlo_runs": 100,
+            "monte_carlo_max_accounts": 100,
+        }
+    )
+
+    assert snapshot["preset_id"] == "lucid_trading_lucidflex_50k"
+    assert snapshot["strategy_params"]["period_k"] == 20
+    assert snapshot["bankroll"] == 3000
