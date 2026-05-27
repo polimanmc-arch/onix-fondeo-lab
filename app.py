@@ -1995,6 +1995,10 @@ def render_diagnostics_tab(
         columns_per_row=4,
     )
 
+    st.subheader("Cost Sensitivity")
+    st.caption("Compare current results with reduced-cost and no-cost scenarios.")
+    render_cost_sensitivity(diagnostics)
+
     st.subheader("Trade Quality")
     st.caption("Whether the strategy wins often enough for its average win/loss profile.")
     render_metric_grid(
@@ -2096,6 +2100,39 @@ def render_diagnostics_tab(
                     f"Best day: {best_day['Date']} ({format_currency_full(best_day['NetPnL'])}) | "
                     f"Worst day: {worst_day['Date']} ({format_currency_full(worst_day['NetPnL'])})"
                 )
+
+
+def render_cost_sensitivity(diagnostics: dict[str, Any]) -> None:
+    sensitivity = diagnostics.get("cost_sensitivity", {})
+    if not sensitivity:
+        st.info("Cost sensitivity requires NetPnL and cost columns.")
+        return
+
+    render_metric_grid(
+        [
+            ("Current Net PnL", format_currency_compact(sensitivity["current_net_pnl"])),
+            ("No-Cost Net PnL", format_currency_compact(sensitivity["no_cost_net_pnl"])),
+            ("Total Cost Drag", format_currency_compact(sensitivity["total_cost_drag"])),
+            ("Cost Drag / No-Cost PnL", format_percent(sensitivity["cost_drag_percent"])),
+        ],
+        columns_per_row=4,
+    )
+
+    sensitivity_table = diagnostics.get("cost_sensitivity_table", pd.DataFrame())
+    if not sensitivity_table.empty:
+        st.dataframe(format_cost_sensitivity_table(sensitivity_table), hide_index=True, use_container_width=True)
+
+
+def format_cost_sensitivity_table(table: pd.DataFrame) -> pd.DataFrame:
+    if table.empty:
+        return table
+    formatted = table.copy()
+    for column in ["ProjectedNetPnL", "CostApplied", "PnLImprovement"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(format_currency_full)
+    if "CostLevel" in formatted.columns:
+        formatted["CostLevel"] = formatted["CostLevel"].apply(format_percent)
+    return formatted
 
 
 def render_direction_diagnostics(direction_table: pd.DataFrame) -> None:
@@ -3143,6 +3180,8 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
         return {
             "overtrading": {},
             "costs": {},
+            "cost_sensitivity": {},
+            "cost_sensitivity_table": pd.DataFrame(),
             "quality": {},
             "direction_table": pd.DataFrame(),
             "exit_reason_table": pd.DataFrame(),
@@ -3176,6 +3215,7 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
     cost_as_percent_of_gross_profit = (
         float(total_cost.sum()) / gross_profit if gross_profit > 0 else None
     )
+    cost_sensitivity = build_cost_sensitivity_summary(net_pnl, gross_pnl, total_cost)
 
     daily_table = _daily_diagnostics_table(trades, exit_time, net_pnl, total_cost)
     best_day = None
@@ -3211,6 +3251,8 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
             "total_slippage_cost": float(_numeric_column(trades, "SlippageCost").sum()),
             "total_spread_cost": float(_numeric_column(trades, "SpreadCost").sum()),
         },
+        "cost_sensitivity": cost_sensitivity,
+        "cost_sensitivity_table": build_cost_sensitivity_table(cost_sensitivity),
         "quality": {
             "average_winner": average_winner,
             "average_loser": average_loser,
@@ -3283,6 +3325,50 @@ def build_direction_diagnostics_table(trades: pd.DataFrame) -> pd.DataFrame:
             }
         )
     return pd.DataFrame(rows, columns=columns)
+
+
+def build_cost_sensitivity_summary(
+    net_pnl: pd.Series,
+    gross_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> dict[str, float | None]:
+    current_net_pnl = float(net_pnl.sum())
+    no_cost_net_pnl = float(gross_pnl.sum())
+    total_cost_drag = float(total_cost.sum())
+    return {
+        "current_net_pnl": current_net_pnl,
+        "no_cost_net_pnl": no_cost_net_pnl,
+        "total_cost_drag": total_cost_drag,
+        "pnl_improvement_without_costs": no_cost_net_pnl - current_net_pnl,
+        "cost_drag_percent": _safe_divide_optional(total_cost_drag, abs(no_cost_net_pnl)),
+    }
+
+
+def build_cost_sensitivity_table(cost_sensitivity: dict[str, float | None]) -> pd.DataFrame:
+    if not cost_sensitivity:
+        return pd.DataFrame(columns=["Scenario", "CostLevel", "ProjectedNetPnL", "CostApplied", "PnLImprovement"])
+
+    no_cost_net_pnl = float(cost_sensitivity["no_cost_net_pnl"] or 0.0)
+    total_cost_drag = float(cost_sensitivity["total_cost_drag"] or 0.0)
+    current_net_pnl = float(cost_sensitivity["current_net_pnl"] or 0.0)
+    rows = []
+    for label, cost_level in [
+        ("Current costs", 1.0),
+        ("Half costs", 0.5),
+        ("No costs", 0.0),
+    ]:
+        cost_applied = total_cost_drag * cost_level
+        projected_net_pnl = no_cost_net_pnl - cost_applied
+        rows.append(
+            {
+                "Scenario": label,
+                "CostLevel": cost_level,
+                "ProjectedNetPnL": projected_net_pnl,
+                "CostApplied": cost_applied,
+                "PnLImprovement": projected_net_pnl - current_net_pnl,
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _empty_direction_diagnostics_row(direction: str) -> dict[str, Any]:

@@ -16,6 +16,7 @@ under `Unreleased` until a stable tag is created.
 - Full Streamlit run manifest with git, setup, strategy, risk, cost, and artifact metadata.
 - Streamlit Long vs Short strategy diagnostics in the Backtest tab.
 - Streamlit session, weekday, hourly, and daily time-of-day diagnostics.
+- Streamlit cost sensitivity view for current, half-cost, and no-cost scenarios.
 
 ### Notes
 

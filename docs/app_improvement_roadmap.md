@@ -244,7 +244,7 @@ Acceptance criteria:
 
 ### 15. Cost Sensitivity View
 
-Status: Next
+Status: Done
 
 Compare strategy results with and without trading costs.
 
@@ -257,7 +257,7 @@ Acceptance criteria:
 
 ### 16. Account Rule Audit Table
 
-Status: Planned
+Status: Next
 
 Show exactly which rules affected each account.
 

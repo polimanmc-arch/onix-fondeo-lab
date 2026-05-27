@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 from app import (
     app_comparison_row,
     build_trade_diagnostics,
+    build_cost_sensitivity_table,
     build_direction_diagnostics_table,
     comparison_display_dataframe,
     comparison_chart_dataframe,
@@ -24,6 +25,7 @@ from app import (
     filter_comparison_dataframe,
     filter_trades_for_explorer,
     filter_trades_for_chart,
+    format_cost_sensitivity_table,
     format_direction_diagnostics_table,
     build_market_data_summary,
     build_run_manifest,
@@ -93,6 +95,14 @@ def test_build_trade_diagnostics_calculates_overtrading_metrics():
     assert diagnostics["overtrading"]["max_trades_in_one_day"] == 2
     assert diagnostics["overtrading"]["median_holding_minutes"] == 15
     assert diagnostics["direction_table"].empty
+    assert diagnostics["cost_sensitivity"]["current_net_pnl"] == 75
+    assert diagnostics["cost_sensitivity"]["no_cost_net_pnl"] == 100
+    assert diagnostics["cost_sensitivity"]["total_cost_drag"] == 25
+    assert diagnostics["cost_sensitivity_table"]["Scenario"].tolist() == [
+        "Current costs",
+        "Half costs",
+        "No costs",
+    ]
 
 
 def test_build_trade_diagnostics_handles_missing_cost_columns():
@@ -111,6 +121,43 @@ def test_build_trade_diagnostics_handles_missing_cost_columns():
     assert diagnostics["costs"]["total_cost"] == 0
     assert diagnostics["costs"]["total_commission"] == 0
     assert diagnostics["costs"]["net_pnl"] == 100
+
+
+def test_build_cost_sensitivity_table_projects_reduced_cost_scenarios():
+    summary = {
+        "current_net_pnl": 75,
+        "no_cost_net_pnl": 100,
+        "total_cost_drag": 25,
+        "pnl_improvement_without_costs": 25,
+        "cost_drag_percent": 0.25,
+    }
+
+    table = build_cost_sensitivity_table(summary)
+
+    assert table["Scenario"].tolist() == ["Current costs", "Half costs", "No costs"]
+    assert table["ProjectedNetPnL"].tolist() == [75, 87.5, 100]
+    assert table["CostApplied"].tolist() == [25, 12.5, 0]
+    assert table["PnLImprovement"].tolist() == [0, 12.5, 25]
+
+
+def test_format_cost_sensitivity_table_formats_money_and_percent():
+    table = pd.DataFrame(
+        [
+            {
+                "Scenario": "Half costs",
+                "CostLevel": 0.5,
+                "ProjectedNetPnL": 87.5,
+                "CostApplied": 12.5,
+                "PnLImprovement": 12.5,
+            }
+        ]
+    )
+
+    formatted = format_cost_sensitivity_table(table)
+
+    assert formatted.loc[0, "CostLevel"] == "50.00%"
+    assert formatted.loc[0, "ProjectedNetPnL"] == "$87.50"
+    assert formatted.loc[0, "CostApplied"] == "$12.50"
 
 
 def test_build_direction_diagnostics_table_splits_long_and_short():
