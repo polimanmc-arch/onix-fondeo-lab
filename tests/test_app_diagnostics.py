@@ -18,12 +18,15 @@ from app import (
     filter_trades_for_explorer,
     filter_trades_for_chart,
     build_market_data_summary,
+    build_preset_rules_summary,
     current_controls_snapshot,
+    format_rule_value,
     load_app_setup,
     market_data_file_options,
     market_data_option_label,
     prepare_trade_pnl_chart_data,
     preset_option_label,
+    preset_rules_rows,
     save_app_setup,
     slugify_setup_name,
     validate_market_data_file,
@@ -422,3 +425,57 @@ def test_current_controls_snapshot_captures_reproducible_setup():
     assert snapshot["preset_id"] == "lucid_trading_lucidflex_50k"
     assert snapshot["strategy_params"]["period_k"] == 20
     assert snapshot["bankroll"] == 3000
+
+
+def test_build_preset_rules_summary_extracts_key_sections():
+    preset = {
+        "preset_id": "tradeify_growth_50k",
+        "company": "Tradeify",
+        "plan": "Growth",
+        "account_name": "Growth 50K",
+        "account_size": 50000,
+        "is_official": True,
+        "rules_verified": True,
+        "evaluation": {
+            "enabled": True,
+            "evaluation_cost": 87,
+            "profit_target": 3000,
+        },
+        "funded": {
+            "enabled": True,
+            "payout_trigger_profit": 3000,
+            "profit_split": 0.9,
+        },
+        "metadata": {
+            "drawdown_type": "EOD trailing max drawdown",
+            "funded_consistency_percent": 0.35,
+        },
+    }
+
+    summary = build_preset_rules_summary(preset)
+
+    assert summary["identity"]["company"] == "Tradeify"
+    assert summary["evaluation"]["profit_target"] == 3000
+    assert summary["funded"]["profit_split"] == 0.9
+    assert summary["metadata"]["drawdown_type"] == "EOD trailing max drawdown"
+
+
+def test_preset_rules_rows_formats_values_for_display():
+    summary = {
+        "identity": {"company": "Tradeify", "account_size": 50000},
+        "evaluation": {"profit_target": 3000},
+        "funded": {"profit_split": 0.9},
+        "metadata": {"funded_consistency_enabled": True},
+    }
+
+    rows = preset_rules_rows(summary)
+    values_by_rule = {row["Rule"]: row["Value"] for row in rows}
+
+    assert values_by_rule["profit_target"] == "$3,000.00"
+    assert values_by_rule["profit_split"] == "90.00%"
+    assert values_by_rule["funded_consistency_enabled"] == "Yes"
+
+
+def test_format_rule_value_handles_complex_metadata():
+    assert format_rule_value("payout_tiers", {"1": 1500}) == '{"1": 1500}'
+    assert format_rule_value("platforms", ["Tradovate", "NinjaTrader"]) == "Tradovate, NinjaTrader"

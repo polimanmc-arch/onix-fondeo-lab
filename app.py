@@ -95,6 +95,7 @@ def sidebar_controls() -> dict[str, Any]:
         selected_preset_id = selected_preset["preset_id"]
         selected_preset_runnable = selected_preset["is_runnable"]
         render_selected_preset_info(selected_preset)
+        render_preset_rules_panel(selected_preset)
         comparison_enabled = st.checkbox(
             "Compare multiple presets",
             value=False,
@@ -844,7 +845,13 @@ def store_analysis_results(
             "plan": preset.get("plan"),
             "account_name": preset.get("account_name"),
             "account_size": preset.get("account_size"),
+            "is_official": preset.get("is_official"),
+            "rules_verified": preset.get("rules_verified"),
+            "source_url": preset.get("source_url"),
+            "last_verified_at": preset.get("last_verified_at"),
+            "notes": preset.get("notes"),
         },
+        "selected_preset_rules": build_preset_rules_summary(preset),
         "selected_strategy_name": controls.get("strategy_name"),
         "strategy_params": controls.get("strategy_params", {}),
         "input_configuration": {
@@ -1126,6 +1133,13 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
         hide_index=True,
         use_container_width=True,
     )
+
+    st.subheader("Selected Preset Rules")
+    preset_rules = analysis_state.get("selected_preset_rules")
+    if preset_rules:
+        render_preset_rules_summary(preset_rules)
+    else:
+        st.info("Preset rule details are available after running a new analysis.")
 
     st.subheader("Market Data Quality")
     market_data_summary = analysis_state.get("market_data_summary")
@@ -2568,6 +2582,166 @@ def render_selected_preset_info(preset: dict[str, Any]) -> None:
         remaining = len(missing_fields) - 8
         suffix = f" and {remaining} more" if remaining > 0 else ""
         st.warning(f"Preset is not runnable. Missing fields: {shown_fields}{suffix}.")
+
+
+def render_preset_rules_panel(preset: dict[str, Any]) -> None:
+    with st.expander("Preset rules", expanded=False):
+        render_preset_rules_summary(build_preset_rules_summary(preset))
+
+
+def render_preset_rules_summary(summary: dict[str, Any]) -> None:
+    render_metric_grid(
+        [
+            ("Official", "Yes" if summary["identity"].get("is_official") else "No"),
+            ("Verified", "Yes" if summary["identity"].get("rules_verified") else "No"),
+            ("Runnable", "Yes" if summary["identity"].get("is_runnable") else "No"),
+            ("Account Size", format_account_size(summary["identity"].get("account_size"))),
+        ],
+        columns_per_row=4,
+    )
+    st.dataframe(
+        pd.DataFrame(preset_rules_rows(summary)),
+        hide_index=True,
+        use_container_width=True,
+    )
+    notes = summary["identity"].get("notes")
+    if notes:
+        st.caption(notes)
+    source_url = summary["identity"].get("source_url")
+    if source_url:
+        st.caption(f"Source: {source_url}")
+    missing_fields = summary["identity"].get("missing_fields", [])
+    if missing_fields:
+        st.warning(f"Missing runnable fields: {', '.join(missing_fields[:12])}")
+
+
+def build_preset_rules_summary(preset: dict[str, Any]) -> dict[str, Any]:
+    is_runnable = preset.get("is_runnable")
+    missing_fields = preset.get("missing_fields")
+    if is_runnable is None or missing_fields is None:
+        is_runnable, missing_fields = validate_preset_is_runnable(preset)
+
+    return {
+        "identity": {
+            "preset_id": preset.get("preset_id"),
+            "company": preset.get("company"),
+            "plan": preset.get("plan"),
+            "account_name": preset.get("account_name"),
+            "account_size": preset.get("account_size"),
+            "is_official": preset.get("is_official"),
+            "rules_verified": preset.get("rules_verified"),
+            "is_runnable": is_runnable,
+            "missing_fields": missing_fields,
+            "source_url": preset.get("source_url"),
+            "last_verified_at": preset.get("last_verified_at"),
+            "notes": preset.get("notes"),
+        },
+        "evaluation": preset_rule_section(
+            preset.get("evaluation", {}),
+            [
+                "enabled",
+                "evaluation_cost",
+                "profit_target",
+                "max_drawdown",
+                "max_daily_loss",
+                "minimum_trading_days",
+                "daily_profit_cap",
+                "consistency_enabled",
+                "consistency_percent",
+            ],
+        ),
+        "funded": preset_rule_section(
+            preset.get("funded", {}),
+            [
+                "enabled",
+                "max_drawdown",
+                "max_daily_loss",
+                "minimum_withdrawable_profit",
+                "payout_trigger_profit",
+                "profit_split",
+                "reset_after_payout",
+            ],
+        ),
+        "metadata": preset_rule_section(
+            preset.get("metadata", {}),
+            [
+                "drawdown_type",
+                "drawdown_breach_type",
+                "funded_payout_policy",
+                "payout_style",
+                "funded_consistency_enabled",
+                "funded_consistency_percent",
+                "funded_minimum_trading_days_with_profit",
+                "minimum_winning_days",
+                "winning_day_threshold",
+                "minimum_daily_profit",
+                "minimum_daily_profit_for_payout_day",
+                "payout_minimum",
+                "payout_cap",
+                "payout_tiers",
+                "daily_loss_limit_is_soft_breach",
+                "no_activation_fees",
+                "close_positions_before",
+                "no_overnight_positions",
+                "supported_markets",
+                "max_sim_funded_accounts",
+                "simulation_approximation",
+            ],
+        ),
+    }
+
+
+def preset_rule_section(source: dict[str, Any], keys: list[str]) -> dict[str, Any]:
+    return {key: source.get(key) for key in keys if key in source}
+
+
+def preset_rules_rows(summary: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for section_name in ["identity", "evaluation", "funded", "metadata"]:
+        section = summary.get(section_name, {})
+        for key, value in section.items():
+            if key in {"notes", "source_url", "missing_fields"}:
+                continue
+            rows.append(
+                {
+                    "Section": section_name.title(),
+                    "Rule": key,
+                    "Value": format_rule_value(key, value),
+                }
+            )
+    return rows
+
+
+def format_rule_value(key: str, value: Any) -> str:
+    if value is None:
+        return "N/A"
+    if isinstance(value, bool):
+        return "Yes" if value else "No"
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return json.dumps(value, default=str)
+    if key.endswith("percent") or key in {"profit_split"}:
+        try:
+            return format_percent(value)
+        except (TypeError, ValueError):
+            return str(value)
+    money_like_fragments = [
+        "cost",
+        "target",
+        "drawdown",
+        "loss",
+        "profit",
+        "payout",
+        "balance",
+        "cap",
+    ]
+    if any(fragment in key for fragment in money_like_fragments):
+        try:
+            return format_currency_full(value)
+        except (TypeError, ValueError):
+            return str(value)
+    return str(value)
 
 
 def _account_size_sort_key(size: Any) -> float:
