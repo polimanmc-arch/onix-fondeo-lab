@@ -257,7 +257,7 @@ Acceptance criteria:
 
 ### 16. Account Rule Audit Table
 
-Status: Next
+Status: Done
 
 Show exactly which rules affected each account.
 
@@ -271,7 +271,7 @@ Acceptance criteria:
 
 ### 17. Preset Comparison Detail View
 
-Status: Planned
+Status: Next
 
 Add a richer comparison section for presets.
 

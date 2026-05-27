@@ -30,12 +30,15 @@ from app import (
     build_market_data_summary,
     build_run_manifest,
     build_account_event_timeline,
+    build_account_rule_audit,
     build_preset_rules_summary,
     classify_session_hour,
     account_event_timeline_dataframe,
+    account_rule_audit_dataframe,
     account_summary_dataframe,
     build_account_summary,
     format_account_event_timeline_dataframe,
+    format_account_rule_audit_dataframe,
     format_account_summary_dataframe,
     format_bankroll_curve_dataframe,
     current_controls_snapshot,
@@ -769,6 +772,93 @@ def test_account_event_timeline_dataframe_uses_expected_columns():
 
     assert dataframe.columns.tolist()[0:5] == ["Step", "Time", "AccountID", "Phase", "EventType"]
     assert formatted.loc[0, "Amount"] == "-$87.00"
+
+
+def test_build_account_rule_audit_includes_rule_events():
+    account = SimpleNamespace(
+        account_id=1,
+        phase="FUNDED",
+        status="ACTIVE",
+        pnl=3000,
+        ended_at=None,
+        result_reason=None,
+    )
+    results = {
+        "accounts": [account],
+        "trade_log": [
+            {
+                "AccountID": 1,
+                "Phase": "FUNDED",
+                "TradeID": 10,
+                "TradeTime": "2024-01-02 10:00:00",
+                "OriginalNetPnL": 300,
+                "AppliedNetPnL": 100,
+                "AccountPnL": 4000,
+                "StatusAfterTrade": "ACTIVE",
+                "StatusReason": (
+                    "FUNDED_PAYOUT_TRIGGER_REACHED; "
+                    "Funded consistency rule not satisfied"
+                ),
+            },
+            {
+                "AccountID": 1,
+                "Phase": "FUNDED",
+                "TradeID": 11,
+                "TradeTime": "2024-01-02 11:00:00",
+                "OriginalNetPnL": -300,
+                "AppliedNetPnL": -100,
+                "AccountPnL": -1000,
+                "StatusAfterTrade": "FAILED",
+                "StatusReason": "ACCOUNT_MAX_LOSS",
+            },
+        ],
+    }
+
+    audit = build_account_rule_audit(results)
+    rule_types = [row["RuleType"] for row in audit]
+
+    assert "FUNDED_PAYOUT_TRIGGER_REACHED" in rule_types
+    assert "PAYOUT_BLOCKED_CONSISTENCY" in rule_types
+    assert "ACCOUNT_MAX_LOSS" in rule_types
+    assert audit[0]["Step"] == 1
+    assert audit[0]["RuleGroup"] == "Target / Payout Trigger"
+    assert audit[1]["RuleGroup"] == "Payout Eligibility"
+    assert audit[-1]["Severity"] == "Critical"
+
+
+def test_account_rule_audit_dataframe_formats_money_columns():
+    rows = [
+        {
+            "Step": 1,
+            "Time": "2024-01-02 10:00:00",
+            "AccountID": 1,
+            "Phase": "FUNDED",
+            "RuleGroup": "Loss Limit",
+            "RuleType": "ACCOUNT_MAX_LOSS",
+            "Severity": "Critical",
+            "TradeID": 10,
+            "OriginalNetPnL": -300,
+            "AppliedNetPnL": -100,
+            "AccountPnL": -1000,
+            "Status": "FAILED",
+            "Reason": "ACCOUNT_MAX_LOSS",
+        }
+    ]
+
+    dataframe = account_rule_audit_dataframe(rows)
+    formatted = format_account_rule_audit_dataframe(dataframe)
+
+    assert dataframe.columns.tolist()[0:6] == [
+        "Step",
+        "Time",
+        "AccountID",
+        "Phase",
+        "RuleGroup",
+        "RuleType",
+    ]
+    assert formatted.loc[0, "OriginalNetPnL"] == "-$300.00"
+    assert formatted.loc[0, "AppliedNetPnL"] == "-$100.00"
+    assert formatted.loc[0, "AccountPnL"] == "-$1,000.00"
 
 
 def test_build_account_summary_creates_rows_per_account_phase():

@@ -377,6 +377,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
             st.warning("No runnable presets were available for comparison.")
     account_event_timeline = build_account_event_timeline(results)
     account_summary = build_account_summary(results)
+    account_rule_audit = build_account_rule_audit(results)
 
     exported_files = export_app_outputs(
         trades,
@@ -393,6 +394,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         market_data_summary,
         account_event_timeline,
         account_summary,
+        account_rule_audit,
     )
     store_analysis_results(
         ohlc,
@@ -411,6 +413,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         market_data_summary,
         account_event_timeline,
         account_summary,
+        account_rule_audit,
     )
 
 
@@ -942,6 +945,136 @@ def build_account_summary(results: dict[str, Any]) -> list[dict[str, Any]]:
     )
 
 
+def build_account_rule_audit(results: dict[str, Any]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for trade_event in results.get("trade_log", []):
+        reason = trade_event.get("StatusReason") or trade_event.get("AccountAwareExitReason")
+        if not reason:
+            continue
+        for rule_type in rule_types_for_reason(str(reason)):
+            rows.append(
+                account_rule_audit_row(
+                    time=trade_event.get("TradeTime"),
+                    account_id=trade_event.get("AccountID"),
+                    phase=trade_event.get("Phase"),
+                    rule_type=rule_type,
+                    rule_group=account_rule_group(rule_type),
+                    trade_id=trade_event.get("TradeID"),
+                    status=trade_event.get("StatusAfterTrade"),
+                    original_net_pnl=trade_event.get("OriginalNetPnL"),
+                    applied_net_pnl=trade_event.get("AppliedNetPnL"),
+                    account_pnl=trade_event.get("AccountPnL"),
+                    reason=reason,
+                    severity=account_rule_severity(rule_type),
+                )
+            )
+
+    for account in results.get("accounts", []):
+        if account.result_reason:
+            rule_type = trade_log_event_type(str(account.result_reason))
+            if rule_type == "STATUS_REASON":
+                rule_type = "ACCOUNT_RESULT"
+            rows.append(
+                account_rule_audit_row(
+                    time=account.ended_at,
+                    account_id=account.account_id,
+                    phase=account.phase,
+                    rule_type=rule_type,
+                    rule_group=account_rule_group(rule_type),
+                    status=account.status,
+                    account_pnl=account.pnl,
+                    reason=account.result_reason,
+                    severity=account_rule_severity(rule_type),
+                )
+            )
+
+    rows = sorted(rows, key=account_rule_audit_sort_key)
+    for index, row in enumerate(rows, start=1):
+        row["Step"] = index
+    return rows
+
+
+def account_rule_audit_row(
+    time: Any,
+    account_id: Any,
+    phase: Any,
+    rule_type: str,
+    rule_group: str,
+    trade_id: Any = None,
+    status: Any = None,
+    original_net_pnl: Any = None,
+    applied_net_pnl: Any = None,
+    account_pnl: Any = None,
+    reason: Any = None,
+    severity: str = "Info",
+) -> dict[str, Any]:
+    return {
+        "Step": None,
+        "Time": time,
+        "AccountID": account_id,
+        "Phase": phase,
+        "RuleGroup": rule_group,
+        "RuleType": rule_type,
+        "Severity": severity,
+        "TradeID": trade_id,
+        "OriginalNetPnL": original_net_pnl,
+        "AppliedNetPnL": applied_net_pnl,
+        "AccountPnL": account_pnl,
+        "Status": status,
+        "Reason": reason,
+    }
+
+
+def rule_types_for_reason(reason: str) -> list[str]:
+    candidates = [
+        "EVALUATION_TARGET_REACHED",
+        "FUNDED_PAYOUT_TRIGGER_REACHED",
+        "ACCOUNT_MAX_LOSS",
+        "ACCOUNT_DAILY_LOSS",
+    ]
+    rule_types = [candidate for candidate in candidates if candidate in reason]
+    lower_reason = reason.lower()
+    if "consistency" in lower_reason:
+        rule_types.append("PAYOUT_BLOCKED_CONSISTENCY")
+    if "Winning days" in reason:
+        rule_types.append("PAYOUT_BLOCKED_WINNING_DAYS")
+    if "Daily continuity" in reason:
+        rule_types.append("PAYOUT_BLOCKED_DAILY_CONTINUITY")
+    return rule_types or [trade_log_event_type(reason)]
+
+
+def account_rule_group(rule_type: str) -> str:
+    if rule_type in {"EVALUATION_TARGET_REACHED", "FUNDED_PAYOUT_TRIGGER_REACHED"}:
+        return "Target / Payout Trigger"
+    if rule_type in {"ACCOUNT_MAX_LOSS", "ACCOUNT_DAILY_LOSS"}:
+        return "Loss Limit"
+    if rule_type.startswith("PAYOUT_BLOCKED"):
+        return "Payout Eligibility"
+    if rule_type in {"ACCOUNT_RESULT", "ACCOUNT_FAILED"}:
+        return "Account Result"
+    return "Status"
+
+
+def account_rule_severity(rule_type: str) -> str:
+    if rule_type in {"ACCOUNT_MAX_LOSS", "ACCOUNT_DAILY_LOSS", "ACCOUNT_FAILED"}:
+        return "Critical"
+    if rule_type.startswith("PAYOUT_BLOCKED"):
+        return "Warning"
+    if rule_type in {"EVALUATION_TARGET_REACHED", "FUNDED_PAYOUT_TRIGGER_REACHED"}:
+        return "Positive"
+    return "Info"
+
+
+def account_rule_audit_sort_key(row: dict[str, Any]) -> tuple[Any, Any, Any]:
+    time_value = row.get("Time")
+    sort_time = pd.to_datetime(time_value, errors="coerce")
+    if pd.isna(sort_time):
+        sort_time = pd.Timestamp.min
+    account_id = row.get("AccountID")
+    account_id = -1 if account_id is None or pd.isna(account_id) else account_id
+    return (sort_time, account_id, str(row.get("RuleType")))
+
+
 def account_timeline_row(
     time: Any,
     account_id: Any,
@@ -1040,6 +1173,7 @@ def store_analysis_results(
     market_data_summary: dict[str, Any] | None = None,
     account_event_timeline: list[dict[str, Any]] | None = None,
     account_summary: list[dict[str, Any]] | None = None,
+    account_rule_audit: list[dict[str, Any]] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -1055,6 +1189,7 @@ def store_analysis_results(
         "market_data_summary": market_data_summary,
         "account_event_timeline": account_event_timeline or [],
         "account_summary": account_summary or [],
+        "account_rule_audit": account_rule_audit or [],
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -1419,6 +1554,8 @@ def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
         render_funding_summary(analysis_state["business_metrics"])
     with st.expander("Account Summary", expanded=True):
         render_account_summary(analysis_state.get("account_summary", []))
+    with st.expander("Account Rule Audit", expanded=True):
+        render_account_rule_audit(analysis_state.get("account_rule_audit", []))
     with st.expander("Account Event Timeline", expanded=True):
         render_account_event_timeline(analysis_state.get("account_event_timeline", []))
     with st.expander("Bankroll", expanded=True):
@@ -1500,6 +1637,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
                 "comparison_rows": comparison_rows,
                 "market_data_summary": market_data_summary,
                 "account_summary": analysis_state.get("account_summary", []),
+                "account_rule_audit": analysis_state.get("account_rule_audit", []),
                 "account_event_timeline": analysis_state.get("account_event_timeline", []),
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
@@ -1687,6 +1825,84 @@ def format_account_summary_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
         formatted["DrawdownLocked"] = formatted["DrawdownLocked"].apply(
             lambda value: "Yes" if bool(value) else "No"
         )
+    return formatted
+
+
+def render_account_rule_audit(rule_rows: list[dict[str, Any]]) -> None:
+    if not rule_rows:
+        st.info("No account rule events were triggered in this run.")
+        return
+
+    audit = account_rule_audit_dataframe(rule_rows)
+    columns = st.columns(4)
+    group_options = ["All"] + sorted(audit["RuleGroup"].dropna().astype(str).unique())
+    severity_options = ["All"] + sorted(audit["Severity"].dropna().astype(str).unique())
+    phase_options = ["All"] + sorted(audit["Phase"].dropna().astype(str).unique())
+    selected_group = columns[0].selectbox("Rule group", options=group_options, key="rule_audit_group")
+    selected_severity = columns[1].selectbox(
+        "Severity",
+        options=severity_options,
+        key="rule_audit_severity",
+    )
+    selected_phase = columns[2].selectbox("Rule phase", options=phase_options, key="rule_audit_phase")
+    max_rows = columns[3].number_input(
+        "Rule rows",
+        min_value=25,
+        max_value=1000,
+        value=200,
+        step=25,
+        key="rule_audit_max_rows",
+    )
+
+    filtered = audit.copy()
+    if selected_group != "All":
+        filtered = filtered[filtered["RuleGroup"].astype(str) == selected_group]
+    if selected_severity != "All":
+        filtered = filtered[filtered["Severity"].astype(str) == selected_severity]
+    if selected_phase != "All":
+        filtered = filtered[filtered["Phase"].astype(str) == selected_phase]
+
+    st.dataframe(
+        format_account_rule_audit_dataframe(filtered.head(int(max_rows))),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download account rule audit CSV",
+        data=audit.to_csv(index=False),
+        file_name="account_rule_audit.csv",
+        mime="text/csv",
+    )
+
+
+def account_rule_audit_dataframe(rule_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    columns = [
+        "Step",
+        "Time",
+        "AccountID",
+        "Phase",
+        "RuleGroup",
+        "RuleType",
+        "Severity",
+        "TradeID",
+        "OriginalNetPnL",
+        "AppliedNetPnL",
+        "AccountPnL",
+        "Status",
+        "Reason",
+    ]
+    return pd.DataFrame(rule_rows, columns=columns)
+
+
+def format_account_rule_audit_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    formatted = dataframe.copy()
+    for column in ["OriginalNetPnL", "AppliedNetPnL", "AccountPnL"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(
+                lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
+            )
+    if "Time" in formatted.columns:
+        formatted["Time"] = formatted["Time"].apply(_optional_datetime)
     return formatted
 
 
@@ -2923,6 +3139,7 @@ def export_app_outputs(
     market_data_summary: dict[str, Any] | None = None,
     account_event_timeline: list[dict[str, Any]] | None = None,
     account_summary: list[dict[str, Any]] | None = None,
+    account_rule_audit: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
     experiment_id = generate_experiment_id()
     run_dir = create_run_output_dir(experiment_id)
@@ -2953,6 +3170,7 @@ def export_app_outputs(
         "comparison_rows": comparison_rows or [],
         "market_data_summary": market_data_summary,
         "account_summary": account_summary or [],
+        "account_rule_audit": account_rule_audit or [],
         "account_event_timeline": account_event_timeline or [],
     }
     with files["summary_metrics"].open("w", encoding="utf-8") as file:
@@ -2973,6 +3191,9 @@ def export_app_outputs(
     if account_summary:
         files["run_account_summary"] = run_dir / "account_summary.csv"
         pd.DataFrame(account_summary).to_csv(files["run_account_summary"], index=False)
+    if account_rule_audit:
+        files["run_account_rule_audit"] = run_dir / "account_rule_audit.csv"
+        pd.DataFrame(account_rule_audit).to_csv(files["run_account_rule_audit"], index=False)
     if account_event_timeline:
         files["run_account_event_timeline"] = run_dir / "account_event_timeline.csv"
         pd.DataFrame(account_event_timeline).to_csv(

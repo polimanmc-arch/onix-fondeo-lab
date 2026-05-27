@@ -17,6 +17,7 @@ under `Unreleased` until a stable tag is created.
 - Streamlit Long vs Short strategy diagnostics in the Backtest tab.
 - Streamlit session, weekday, hourly, and daily time-of-day diagnostics.
 - Streamlit cost sensitivity view for current, half-cost, and no-cost scenarios.
+- Streamlit account rule audit table with account-aware exits and payout blockers.
 
 ### Notes
 
