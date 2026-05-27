@@ -2009,6 +2009,10 @@ def render_diagnostics_tab(
         columns_per_row=3,
     )
 
+    st.subheader("Long vs Short")
+    st.caption("Directional diagnostics help reveal whether one side carries the edge or the costs.")
+    render_direction_diagnostics(diagnostics["direction_table"])
+
     st.subheader("Warnings / Insights")
     render_diagnostic_warnings(diagnostics, strategy_metrics)
 
@@ -2052,6 +2056,48 @@ def render_diagnostics_tab(
                     f"Best day: {best_day['Date']} ({format_currency_full(best_day['NetPnL'])}) | "
                     f"Worst day: {worst_day['Date']} ({format_currency_full(worst_day['NetPnL'])})"
                 )
+
+
+def render_direction_diagnostics(direction_table: pd.DataFrame) -> None:
+    if direction_table.empty:
+        st.info("Direction diagnostics require a Direction column in the trades.")
+        return
+
+    metric_items = []
+    for _, row in direction_table.iterrows():
+        direction = row["Direction"]
+        metric_items.extend(
+            [
+                (f"{direction} Trades", format_number(row["Trades"])),
+                (f"{direction} Win Rate", format_percent(row["WinRate"])),
+                (f"{direction} Net PnL", format_currency_compact(row["NetPnL"])),
+            ]
+        )
+    render_metric_grid(metric_items, columns_per_row=3)
+    st.dataframe(format_direction_diagnostics_table(direction_table), hide_index=True, use_container_width=True)
+
+
+def format_direction_diagnostics_table(direction_table: pd.DataFrame) -> pd.DataFrame:
+    if direction_table.empty:
+        return direction_table
+    formatted = direction_table.copy()
+    currency_columns = [
+        "NetPnL",
+        "AverageTrade",
+        "TotalCost",
+        "AverageWinner",
+        "AverageLoser",
+    ]
+    for column in currency_columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(format_currency_full)
+    if "WinRate" in formatted.columns:
+        formatted["WinRate"] = formatted["WinRate"].apply(format_percent)
+    if "ProfitFactor" in formatted.columns:
+        formatted["ProfitFactor"] = formatted["ProfitFactor"].apply(format_profit_factor)
+    if "PayoffRatio" in formatted.columns:
+        formatted["PayoffRatio"] = formatted["PayoffRatio"].apply(format_number)
+    return formatted
 
 
 def render_backtest_chart(ohlc_df: pd.DataFrame, trades_df: pd.DataFrame) -> None:
@@ -3058,6 +3104,7 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
             "overtrading": {},
             "costs": {},
             "quality": {},
+            "direction_table": pd.DataFrame(),
             "exit_reason_table": pd.DataFrame(),
             "hourly_table": pd.DataFrame(),
             "daily_table": pd.DataFrame(),
@@ -3132,12 +3179,87 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
             ),
             "expectancy_per_trade": float(net_pnl.mean()) if len(trades) else 0.0,
         },
+        "direction_table": build_direction_diagnostics_table(trades),
         "exit_reason_table": _exit_reason_diagnostics_table(trades, net_pnl),
         "hourly_table": _hourly_diagnostics_table(trades, exit_time, net_pnl, total_cost),
         "daily_table": daily_table,
         "best_day": best_day,
         "worst_day": worst_day,
     }
+
+
+def build_direction_diagnostics_table(trades: pd.DataFrame) -> pd.DataFrame:
+    columns = [
+        "Direction",
+        "Trades",
+        "WinRate",
+        "NetPnL",
+        "AverageTrade",
+        "TotalCost",
+        "AverageWinner",
+        "AverageLoser",
+        "ProfitFactor",
+        "PayoffRatio",
+    ]
+    if trades.empty or "Direction" not in trades.columns:
+        return pd.DataFrame(columns=columns)
+
+    rows = []
+    for direction in ["Long", "Short"]:
+        direction_trades = trades[trades["Direction"].astype(str) == direction]
+        if direction_trades.empty:
+            rows.append(_empty_direction_diagnostics_row(direction))
+            continue
+
+        net_pnl = _numeric_column(direction_trades, "NetPnL")
+        total_cost = _total_cost_series(direction_trades)
+        winners = net_pnl[net_pnl > 0]
+        losers = net_pnl[net_pnl < 0]
+        gross_profit = float(winners.sum())
+        gross_loss = float(losers.sum())
+        average_winner = float(winners.mean()) if not winners.empty else 0.0
+        average_loser = float(losers.mean()) if not losers.empty else 0.0
+        payoff_ratio = (
+            average_winner / abs(average_loser)
+            if average_winner > 0 and average_loser < 0
+            else None
+        )
+        rows.append(
+            {
+                "Direction": direction,
+                "Trades": int(len(direction_trades)),
+                "WinRate": _safe_divide_number(len(winners), len(direction_trades)),
+                "NetPnL": float(net_pnl.sum()),
+                "AverageTrade": float(net_pnl.mean()),
+                "TotalCost": float(total_cost.sum()),
+                "AverageWinner": average_winner,
+                "AverageLoser": average_loser,
+                "ProfitFactor": _profit_factor_from_gross(gross_profit, gross_loss),
+                "PayoffRatio": payoff_ratio,
+            }
+        )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def _empty_direction_diagnostics_row(direction: str) -> dict[str, Any]:
+    return {
+        "Direction": direction,
+        "Trades": 0,
+        "WinRate": 0.0,
+        "NetPnL": 0.0,
+        "AverageTrade": 0.0,
+        "TotalCost": 0.0,
+        "AverageWinner": 0.0,
+        "AverageLoser": 0.0,
+        "ProfitFactor": 0.0,
+        "PayoffRatio": None,
+    }
+
+
+def _profit_factor_from_gross(gross_profit: float, gross_loss: float) -> float:
+    if gross_loss == 0:
+        return float("inf") if gross_profit > 0 else 0.0
+    return gross_profit / abs(gross_loss)
 
 
 def _exit_reason_diagnostics_table(

@@ -14,6 +14,7 @@ if str(ROOT_DIR) not in sys.path:
 from app import (
     app_comparison_row,
     build_trade_diagnostics,
+    build_direction_diagnostics_table,
     comparison_display_dataframe,
     comparison_chart_dataframe,
     comparison_preset_label,
@@ -23,6 +24,7 @@ from app import (
     filter_comparison_dataframe,
     filter_trades_for_explorer,
     filter_trades_for_chart,
+    format_direction_diagnostics_table,
     build_market_data_summary,
     build_run_manifest,
     build_account_event_timeline,
@@ -88,6 +90,7 @@ def test_build_trade_diagnostics_calculates_overtrading_metrics():
     assert diagnostics["overtrading"]["average_trades_per_day"] == 1.5
     assert diagnostics["overtrading"]["max_trades_in_one_day"] == 2
     assert diagnostics["overtrading"]["median_holding_minutes"] == 15
+    assert diagnostics["direction_table"].empty
 
 
 def test_build_trade_diagnostics_handles_missing_cost_columns():
@@ -106,6 +109,67 @@ def test_build_trade_diagnostics_handles_missing_cost_columns():
     assert diagnostics["costs"]["total_cost"] == 0
     assert diagnostics["costs"]["total_commission"] == 0
     assert diagnostics["costs"]["net_pnl"] == 100
+
+
+def test_build_direction_diagnostics_table_splits_long_and_short():
+    trades = pd.DataFrame(
+        [
+            {"Direction": "Long", "NetPnL": 100, "TotalCost": 5},
+            {"Direction": "Long", "NetPnL": -50, "TotalCost": 5},
+            {"Direction": "Short", "NetPnL": 40, "TotalCost": 2},
+        ]
+    )
+
+    table = build_direction_diagnostics_table(trades)
+
+    long_row = table[table["Direction"] == "Long"].iloc[0]
+    short_row = table[table["Direction"] == "Short"].iloc[0]
+    assert long_row["Trades"] == 2
+    assert long_row["WinRate"] == 0.5
+    assert long_row["NetPnL"] == 50
+    assert long_row["AverageTrade"] == 25
+    assert long_row["TotalCost"] == 10
+    assert long_row["ProfitFactor"] == 2
+    assert short_row["Trades"] == 1
+    assert short_row["NetPnL"] == 40
+    assert short_row["ProfitFactor"] == float("inf")
+
+
+def test_build_direction_diagnostics_table_includes_missing_direction_as_zero():
+    trades = pd.DataFrame([{"Direction": "Long", "NetPnL": 100, "TotalCost": 5}])
+
+    table = build_direction_diagnostics_table(trades)
+    short_row = table[table["Direction"] == "Short"].iloc[0]
+
+    assert short_row["Trades"] == 0
+    assert short_row["NetPnL"] == 0
+
+
+def test_format_direction_diagnostics_table_formats_values():
+    table = pd.DataFrame(
+        [
+            {
+                "Direction": "Long",
+                "Trades": 2,
+                "WinRate": 0.5,
+                "NetPnL": 50,
+                "AverageTrade": 25,
+                "TotalCost": 10,
+                "AverageWinner": 100,
+                "AverageLoser": -50,
+                "ProfitFactor": float("inf"),
+                "PayoffRatio": 2,
+            }
+        ]
+    )
+
+    formatted = format_direction_diagnostics_table(table)
+
+    assert formatted.loc[0, "WinRate"] == "50.00%"
+    assert formatted.loc[0, "NetPnL"] == "$50.00"
+    assert formatted.loc[0, "AverageLoser"] == "-$50.00"
+    assert formatted.loc[0, "ProfitFactor"] == "∞"
+    assert formatted.loc[0, "PayoffRatio"] == "2"
 
 
 def test_build_trade_diagnostics_exit_reason_table():

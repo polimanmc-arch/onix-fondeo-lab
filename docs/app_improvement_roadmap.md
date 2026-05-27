@@ -214,7 +214,7 @@ Acceptance criteria:
 
 ### 13. Strategy Long/Short Diagnostics
 
-Status: Next
+Status: Done
 
 Split strategy metrics by direction.
 
@@ -230,7 +230,7 @@ Acceptance criteria:
 
 ### 14. Session And Time-Of-Day Diagnostics
 
-Status: Planned
+Status: Next
 
 Improve time diagnostics into product-quality sections.
 
