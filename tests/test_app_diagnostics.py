@@ -11,8 +11,10 @@ if str(ROOT_DIR) not in sys.path:
 from app import (
     app_comparison_row,
     build_trade_diagnostics,
+    comparison_display_dataframe,
     comparison_rows_to_dataframe,
     compute_stochastic_for_chart,
+    export_comparison_rows,
     filter_trades_for_explorer,
     filter_trades_for_chart,
     prepare_trade_pnl_chart_data,
@@ -252,3 +254,46 @@ def test_comparison_rows_to_dataframe_sorts_by_net_business_pnl():
     dataframe = comparison_rows_to_dataframe(rows)
 
     assert dataframe["company"].tolist() == ["A", "B"]
+
+
+def test_comparison_display_dataframe_formats_readable_values():
+    rows = [
+        {
+            "company": "Tradeify",
+            "plan": "Growth",
+            "account_size": 50000,
+            "pass_rate": 0.5,
+            "payout_rate": 0.25,
+            "total_net_payout": 900,
+            "net_business_pnl": 600,
+            "roi": 2.0,
+            "final_bankroll": 3600,
+            "ruin_probability": 0.1,
+            "risk_adjusted_score": 540,
+            "preset_id": "tradeify_growth_50k",
+        }
+    ]
+
+    dataframe = comparison_display_dataframe(rows)
+
+    assert dataframe.loc[0, "account_size"] == "50K"
+    assert dataframe.loc[0, "pass_rate"] == "50.00%"
+    assert dataframe.loc[0, "net_business_pnl"] == "$600.00"
+
+
+def test_export_comparison_rows_creates_csv(tmp_path):
+    rows = [
+        {
+            "company": "Tradeify",
+            "plan": "Growth",
+            "account_size": 50000,
+            "net_business_pnl": 600,
+            "preset_id": "tradeify_growth_50k",
+        }
+    ]
+
+    output_path = export_comparison_rows(rows, tmp_path)
+
+    assert output_path == tmp_path / "app_preset_comparison.csv"
+    assert output_path.exists()
+    assert "tradeify_growth_50k" in output_path.read_text(encoding="utf-8")

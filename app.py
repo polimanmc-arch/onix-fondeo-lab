@@ -303,6 +303,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         streak_analysis,
         risk_result,
         required_bankroll,
+        comparison_rows,
     )
     store_analysis_results(
         ohlc,
@@ -615,7 +616,17 @@ def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
     st.subheader("Preset Comparison")
     comparison_df = comparison_rows_to_dataframe(comparison_rows)
     render_comparison_rankings(comparison_df)
-    st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+    st.dataframe(
+        comparison_display_dataframe(comparison_rows),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download comparison CSV",
+        data=comparison_df.to_csv(index=False),
+        file_name="app_preset_comparison.csv",
+        mime="text/csv",
+    )
 
 
 def render_comparison_rankings(comparison_df: pd.DataFrame) -> None:
@@ -671,6 +682,34 @@ def comparison_rows_to_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.Da
     )
 
 
+def comparison_display_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    dataframe = comparison_rows_to_dataframe(comparison_rows)
+    if dataframe.empty:
+        return dataframe
+    formatted = dataframe.copy()
+    currency_columns = [
+        "total_net_payout",
+        "net_business_pnl",
+        "final_bankroll",
+        "risk_adjusted_score",
+    ]
+    percent_columns = [
+        "pass_rate",
+        "payout_rate",
+        "roi",
+        "ruin_probability",
+    ]
+    for column in currency_columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(format_currency_full)
+    for column in percent_columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(format_percent)
+    if "account_size" in formatted.columns:
+        formatted["account_size"] = formatted["account_size"].apply(format_account_size)
+    return formatted
+
+
 def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
     with st.expander("Trade Explorer", expanded=True):
         render_backtest_trade_explorer(analysis_state)
@@ -721,7 +760,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
     if comparison_rows:
         with st.expander("Preset Comparison Rows", expanded=False):
             st.dataframe(
-                comparison_rows_to_dataframe(comparison_rows),
+                comparison_display_dataframe(comparison_rows),
                 hide_index=True,
                 use_container_width=True,
             )
@@ -1751,6 +1790,7 @@ def export_app_outputs(
     streak_analysis: dict[str, Any],
     risk_result: dict[str, Any] | None,
     required_bankroll: dict[str, Any] | None,
+    comparison_rows: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     files = {
@@ -1766,10 +1806,26 @@ def export_app_outputs(
         "streak_analysis": streak_analysis,
         "risk_of_ruin_metrics": None if risk_result is None else risk_result["metrics"],
         "required_bankroll": required_bankroll,
+        "comparison_rows": comparison_rows or [],
     }
     with files["summary_metrics"].open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2, default=str)
+    comparison_path = export_comparison_rows(comparison_rows or [], OUTPUT_DIR)
+    if comparison_path is not None:
+        files["preset_comparison"] = comparison_path
     return files
+
+
+def export_comparison_rows(
+    comparison_rows: list[dict[str, Any]],
+    output_dir: Path = OUTPUT_DIR,
+) -> Path | None:
+    if not comparison_rows:
+        return None
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "app_preset_comparison.csv"
+    comparison_rows_to_dataframe(comparison_rows).to_csv(output_path, index=False)
+    return output_path
 
 
 def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
