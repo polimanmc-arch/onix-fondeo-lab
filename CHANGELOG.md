@@ -13,6 +13,7 @@ under `Unreleased` until a stable tag is created.
 - Professional development workflow documentation.
 - Local check script for compile, tests, and staged market-data safety.
 - Streamlit run folders with unique experiment IDs and reproducible app artifacts.
+- Full Streamlit run manifest with git, setup, strategy, risk, cost, and artifact metadata.
 
 ### Notes
 

@@ -24,6 +24,7 @@ from app import (
     filter_trades_for_explorer,
     filter_trades_for_chart,
     build_market_data_summary,
+    build_run_manifest,
     build_account_event_timeline,
     build_preset_rules_summary,
     account_event_timeline_dataframe,
@@ -745,6 +746,62 @@ def test_create_run_output_dir_creates_expected_folder(tmp_path):
     assert run_dir.is_dir()
 
 
+def test_build_run_manifest_includes_reproducibility_fields(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.get_git_commit_hash", lambda: "abc123")
+    monkeypatch.setattr("app.get_git_dirty_state", lambda: False)
+    manifest = build_run_manifest(
+        experiment_id="20260527_143005_abcdef12",
+        run_dir=tmp_path / "20260527_143005_abcdef12",
+        controls={
+            "market_data_path": "data/market_data/sample_NQ_1m.csv",
+            "symbol": "NQ",
+            "point_value": 20.0,
+            "strategy_name": "stochastic",
+            "strategy_params": {"period_k": 20, "period_d": 5, "smooth": 3},
+            "contracts": 1,
+            "stop_loss_points": 70,
+            "take_profit_points": 50,
+            "max_holding_minutes": 60,
+            "commission_per_side": 1.24,
+            "slippage_points": 0.25,
+            "spread_points": 0.25,
+            "bankroll": 3000,
+            "monte_carlo_runs": 100,
+            "monte_carlo_max_accounts": 100,
+            "comparison_enabled": True,
+            "comparison_preset_ids": ["tradeify_growth_50k"],
+        },
+        preset={
+            "preset_id": "lucid_trading_lucidflex_50k",
+            "company": "Lucid Trading",
+            "plan": "LucidFlex",
+            "account_name": "50K",
+            "account_size": 50000,
+            "is_official": True,
+            "rules_verified": True,
+        },
+        config={
+            "evaluation": {"enabled": True},
+            "funded": {"enabled": True},
+            "metadata": {"drawdown_type": "EOD trailing max drawdown"},
+        },
+        market_data_summary={"rows": 120},
+        exported_files={"run_generated_trades": tmp_path / "generated_trades.csv"},
+    )
+
+    assert manifest["manifest_version"] == 1
+    assert manifest["experiment_id"] == "20260527_143005_abcdef12"
+    assert manifest["git"]["commit"] == "abc123"
+    assert manifest["git"]["dirty"] is False
+    assert manifest["preset"]["preset_id"] == "lucid_trading_lucidflex_50k"
+    assert manifest["strategy"]["parameters"]["period_k"] == 20
+    assert manifest["risk_settings"]["stop_loss_points"] == 70
+    assert manifest["cost_settings"]["commission_per_side"] == 1.24
+    assert manifest["bankroll"]["initial_bankroll"] == 3000
+    assert manifest["market_data_summary"]["rows"] == 120
+    assert "run_generated_trades" in manifest["artifacts"]
+
+
 def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr("app.OUTPUT_DIR", tmp_path / "output")
     monkeypatch.setattr("app.RUNS_DIR", tmp_path / "runs")
@@ -789,6 +846,7 @@ def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypa
     assert files["run_generated_trades"].exists()
     assert files["run_strategy_metrics"].exists()
     assert files["run_business_metrics"].exists()
+    assert files["run_manifest"].exists()
     assert files["run_account_summary"].exists()
     assert files["run_account_event_timeline"].exists()
     assert files["run_bankroll_curve"].exists()
@@ -800,3 +858,8 @@ def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypa
     assert summary["strategy_metrics"]["total_trades"] == 1
     assert summary["business_metrics"]["net_business_pnl"] == 50
     assert summary["market_data_summary"]["rows"] == 100
+
+    manifest = json.loads(files["run_manifest"].read_text(encoding="utf-8"))
+    assert manifest["manifest_version"] == 1
+    assert manifest["preset"]["preset_id"] == "demo"
+    assert manifest["artifacts"]["run_generated_trades"].endswith("generated_trades.csv")

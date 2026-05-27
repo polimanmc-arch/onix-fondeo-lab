@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import math
+import subprocess
 from datetime import datetime
 from pathlib import Path
 import sys
@@ -48,6 +49,7 @@ CUSTOM_MARKET_DATA_OPTION = "Custom path..."
 DEFAULT_PRESET_COMPANY = "Lucid Trading"
 DEFAULT_PRESET_PLAN = "LucidFlex"
 DEFAULT_PRESET_ACCOUNT_SIZE = 50000
+APP_VERSION = "v1.6.0-dev"
 
 
 def main() -> None:
@@ -1472,6 +1474,10 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
         for label, path in exported_files.items()
     ]
     st.dataframe(pd.DataFrame(output_rows), hide_index=True, use_container_width=True)
+    manifest_path = exported_files.get("run_manifest")
+    if manifest_path and Path(manifest_path).exists():
+        with st.expander("Run Manifest", expanded=False):
+            st.json(load_json_file(Path(manifest_path)))
 
     st.subheader("Raw Data Previews")
     with st.expander("OHLC Preview", expanded=False):
@@ -2885,7 +2891,126 @@ def export_app_outputs(
         files["preset_comparison"] = comparison_path
     if run_comparison_path is not None:
         files["run_preset_comparison"] = run_comparison_path
+    files["run_manifest"] = run_dir / "manifest.json"
+    manifest = build_run_manifest(
+        experiment_id=experiment_id,
+        run_dir=run_dir,
+        controls=controls or {},
+        preset=preset or {},
+        config=config or {},
+        market_data_summary=market_data_summary,
+        exported_files=files,
+    )
+    write_json_file(files["run_manifest"], manifest)
     return files
+
+
+def build_run_manifest(
+    experiment_id: str,
+    run_dir: Path,
+    controls: dict[str, Any],
+    preset: dict[str, Any],
+    config: dict[str, Any],
+    market_data_summary: dict[str, Any] | None,
+    exported_files: dict[str, Path],
+) -> dict[str, Any]:
+    input_config = {
+        "market_data_path": controls.get("market_data_path"),
+        "symbol": controls.get("symbol"),
+        "point_value": controls.get("point_value"),
+        "time_filters": {
+            "strategy_start_time": controls.get("strategy_start_time"),
+            "strategy_end_time": controls.get("strategy_end_time"),
+            "force_close_time": controls.get("force_close_time"),
+        },
+    }
+    return {
+        "manifest_version": 1,
+        "experiment_id": experiment_id,
+        "created_at": datetime.now().isoformat(timespec="seconds"),
+        "run_folder": str(run_dir),
+        "git": {
+            "commit": get_git_commit_hash(),
+            "dirty": get_git_dirty_state(),
+        },
+        "app": {
+            "name": "Onix Fondeo Lab",
+            "version": APP_VERSION,
+        },
+        "preset": {
+            "preset_id": preset.get("preset_id"),
+            "company": preset.get("company"),
+            "plan": preset.get("plan"),
+            "account_name": preset.get("account_name"),
+            "account_size": preset.get("account_size"),
+            "is_official": preset.get("is_official"),
+            "rules_verified": preset.get("rules_verified"),
+        },
+        "input": input_config,
+        "strategy": {
+            "name": controls.get("strategy_name"),
+            "parameters": controls.get("strategy_params", {}),
+        },
+        "risk_settings": {
+            "contracts": controls.get("contracts"),
+            "stop_loss_points": controls.get("stop_loss_points"),
+            "take_profit_points": controls.get("take_profit_points"),
+            "max_holding_minutes": controls.get("max_holding_minutes"),
+        },
+        "cost_settings": {
+            "commission_per_side": controls.get("commission_per_side"),
+            "slippage_points": controls.get("slippage_points"),
+            "spread_points": controls.get("spread_points"),
+        },
+        "bankroll": {
+            "initial_bankroll": controls.get("bankroll"),
+            "monte_carlo_runs": controls.get("monte_carlo_runs"),
+            "monte_carlo_max_accounts": controls.get("monte_carlo_max_accounts"),
+        },
+        "comparison": {
+            "enabled": controls.get("comparison_enabled"),
+            "preset_ids": controls.get("comparison_preset_ids", []),
+        },
+        "config_summary": {
+            "evaluation_enabled": config.get("evaluation", {}).get("enabled"),
+            "funded_enabled": config.get("funded", {}).get("enabled"),
+            "metadata_keys": sorted(config.get("metadata", {}).keys()),
+        },
+        "market_data_summary": market_data_summary,
+        "artifacts": {
+            label: str(path)
+            for label, path in exported_files.items()
+            if label != "run_folder"
+        },
+    }
+
+
+def get_git_commit_hash() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return None
+    return result.stdout.strip() or None
+
+
+def get_git_dirty_state() -> bool | None:
+    try:
+        result = subprocess.run(
+            ["git", "status", "--short"],
+            cwd=ROOT_DIR,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except Exception:
+        return None
+    return bool(result.stdout.strip())
 
 
 def generate_experiment_id(timestamp: datetime | None = None) -> str:
@@ -2907,6 +3032,11 @@ def write_json_file(path: Path, payload: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as file:
         json.dump(payload, file, indent=2, default=str)
+
+
+def load_json_file(path: Path) -> Any:
+    with path.open("r", encoding="utf-8") as file:
+        return json.load(file)
 
 
 def export_comparison_rows(

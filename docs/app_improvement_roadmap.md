@@ -190,7 +190,7 @@ Acceptance criteria:
 
 ### 12. Full Run Manifest
 
-Status: Next
+Status: Done
 
 Save a machine-readable manifest for each run.
 
@@ -214,7 +214,7 @@ Acceptance criteria:
 
 ### 13. Strategy Long/Short Diagnostics
 
-Status: Planned
+Status: Next
 
 Split strategy metrics by direction.
 
