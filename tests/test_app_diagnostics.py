@@ -31,14 +31,17 @@ from app import (
     build_market_data_summary,
     build_run_manifest,
     build_account_event_timeline,
+    build_account_cycle_registry,
     build_account_rule_audit,
     build_preset_rules_summary,
     classify_session_hour,
     account_event_timeline_dataframe,
+    account_cycle_registry_dataframe,
     account_rule_audit_dataframe,
     account_summary_dataframe,
     build_account_summary,
     format_account_event_timeline_dataframe,
+    format_account_cycle_registry_dataframe,
     format_account_rule_audit_dataframe,
     format_account_summary_dataframe,
     format_bankroll_curve_dataframe,
@@ -916,6 +919,118 @@ def test_account_rule_audit_dataframe_formats_money_columns():
     assert formatted.loc[0, "AccountPnL"] == "-$1,000.00"
 
 
+def test_build_account_cycle_registry_creates_run_level_cycle_rows():
+    payout = SimpleNamespace(gross_payout=1000, net_payout=900)
+    account = SimpleNamespace(
+        account_id=1,
+        phase="FUNDED",
+        status="ACTIVE",
+        pnl=750,
+        high_watermark=1500,
+        trading_days={pd.Timestamp("2024-01-02").date()},
+        daily_pnl={pd.Timestamp("2024-01-02").date(): 750},
+        trades_count=2,
+        started_at="2024-01-02 09:30:00",
+        ended_at=None,
+        result_reason=None,
+        payouts=[payout],
+        trailing_drawdown_floor=-500,
+        eod_high_pnl=1500,
+        drawdown_locked=False,
+    )
+    results = {
+        "accounts": [account],
+        "trade_log": [
+            {
+                "AccountID": 1,
+                "Phase": "FUNDED",
+                "TradeID": 1,
+                "TradeTime": "2024-01-02 09:45:00",
+                "OriginalNetPnL": 600,
+                "AppliedNetPnL": 600,
+            },
+            {
+                "AccountID": 1,
+                "Phase": "FUNDED",
+                "TradeID": 2,
+                "TradeTime": "2024-01-02 15:00:00",
+                "OriginalNetPnL": 150,
+                "AppliedNetPnL": 150,
+            },
+        ],
+    }
+    rule_audit = [
+        {
+            "AccountID": 1,
+            "Phase": "FUNDED",
+            "RuleType": "FUNDED_PAYOUT_TRIGGER_REACHED",
+        }
+    ]
+
+    registry = build_account_cycle_registry(
+        results=results,
+        preset={
+            "preset_id": "tradeify_growth_50k",
+            "company": "Tradeify",
+            "plan": "Growth",
+            "account_name": "50K",
+            "account_size": 50000,
+        },
+        controls={
+            "strategy_name": "stochastic",
+            "strategy_params": {"period_k": 20},
+            "contracts": 1,
+            "stop_loss_points": 70,
+            "take_profit_points": 50,
+            "max_holding_minutes": 60,
+            "commission_per_side": 1.24,
+            "slippage_points": 0.25,
+            "spread_points": 0.25,
+            "market_data_path": "data/market_data/sample_NQ_1m.csv",
+            "symbol": "NQ",
+            "point_value": 20,
+        },
+        config={"funded": {"payout_trigger_profit": 1000, "max_drawdown": 2000}},
+        account_rule_audit=rule_audit,
+    )
+
+    row = registry[0]
+    assert row["CycleNumber"] == 1
+    assert row["PresetID"] == "tradeify_growth_50k"
+    assert row["Phase"] == "FUNDED"
+    assert row["TradesCount"] == 2
+    assert row["Wins"] == 2
+    assert row["AppliedNetPnL"] == 750
+    assert row["DistanceToTarget"] == 250
+    assert row["DistanceToDrawdown"] == 1250
+    assert row["FundedPayoutTriggerReachedCount"] == 1
+    assert row["MorningTrades"] == 1
+    assert row["AfternoonTrades"] == 1
+    assert row["TotalNetPayout"] == 900
+
+
+def test_account_cycle_registry_dataframe_formats_values():
+    rows = [
+        {
+            "CycleNumber": 1,
+            "Phase": "EVALUATION",
+            "Status": "PASSED",
+            "StartedAt": "2024-01-02 09:30:00",
+            "EndedAt": "2024-01-02 10:30:00",
+            "WinRate": 0.5,
+            "FinalPnL": 3000,
+            "TotalNetPayout": 0,
+        }
+    ]
+
+    dataframe = account_cycle_registry_dataframe(rows)
+    formatted = format_account_cycle_registry_dataframe(dataframe)
+
+    assert formatted.loc[0, "WinRate"] == "50.00%"
+    assert formatted.loc[0, "FinalPnL"] == "$3,000.00"
+    assert formatted.loc[0, "TotalNetPayout"] == "$0.00"
+
+
 def test_build_account_summary_creates_rows_per_account_phase():
     payout = SimpleNamespace(gross_payout=1000, net_payout=900)
     evaluation_account = SimpleNamespace(
@@ -1136,6 +1251,8 @@ def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypa
         market_data_summary={"rows": 100},
         account_event_timeline=[{"EventType": "ACCOUNT_OPENED", "AccountID": 1}],
         account_summary=[{"AccountID": 1, "Phase": "EVALUATION", "Status": "PASSED"}],
+        account_rule_audit=[{"AccountID": 1, "RuleType": "EVALUATION_TARGET_REACHED"}],
+        account_cycle_registry=[{"CycleNumber": 1, "AccountID": 1, "Phase": "EVALUATION"}],
     )
 
     assert files["run_folder"].is_dir()
@@ -1144,6 +1261,8 @@ def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypa
     assert files["run_business_metrics"].exists()
     assert files["run_manifest"].exists()
     assert files["run_account_summary"].exists()
+    assert files["run_account_rule_audit"].exists()
+    assert files["run_account_cycle_registry"].exists()
     assert files["run_account_event_timeline"].exists()
     assert files["run_bankroll_curve"].exists()
     assert files["run_risk_of_ruin_metrics"].exists()

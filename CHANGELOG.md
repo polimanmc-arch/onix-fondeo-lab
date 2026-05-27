@@ -19,6 +19,7 @@ under `Unreleased` until a stable tag is created.
 - Streamlit cost sensitivity view for current, half-cost, and no-cost scenarios.
 - Streamlit account rule audit table with account-aware exits and payout blockers.
 - Streamlit preset comparison detail view with size filters and best/worst rankings.
+- Streamlit Account Cycle Registry for full-run account/cycle logging.
 
 ### Notes
 

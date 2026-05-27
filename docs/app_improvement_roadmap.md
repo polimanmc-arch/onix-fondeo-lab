@@ -282,9 +282,105 @@ Acceptance criteria:
 - Show best/worst preset cards.
 - Export comparison CSV.
 
-### 18. Risk Of Ruin Visuals
+### 18. Account Cycle Registry
+
+Status: Done
+
+Create a progressive registry for the complete run, inspired by account/cycle
+research logs. Each row represents an account phase/cycle inside the run and
+captures how the account moved through evaluation, funded, payout, failure, and
+rule events.
+
+Acceptance criteria:
+
+- Export `account_cycle_registry.csv` in each run folder.
+- Show Account Cycle Registry in Funding & Risk.
+- Include preset identity, account identity, phase, status, start/end times,
+  trades, wins/losses, PnL, target/drawdown distance, payouts, session PnL,
+  rule event counts, and key strategy/risk/cost settings.
+- Export the registry even for one-account runs.
+
+### 19. Account Transition Wait Time
 
 Status: Next
+
+Add a configurable wait time between account transitions. For example, if an
+evaluation passes, wait 60 minutes before the funded account can start taking
+trades. This prevents unrealistic immediate trading on the next account.
+
+Acceptance criteria:
+
+- Sidebar input for account transition wait minutes.
+- Simulation skips trades during the transition window.
+- Works for evaluation-to-funded and failed-account-to-new-evaluation flows.
+- Account Cycle Registry records transition timing.
+
+### 20. Phase Risk Management Presets
+
+Status: Planned
+
+Allow different execution/risk profiles based on the stage of an account.
+Examples:
+
+- Evaluation first trade / first day.
+- Evaluation continuation after a winning first day.
+- Evaluation final push when only a small amount remains to target.
+- Funded first day.
+- Funded continuation days.
+
+Acceptance criteria:
+
+- UI can define named phase risk profiles.
+- Profiles can override contracts, SL, TP, max holding, costs, and force close.
+- Backtest/simulator can select the correct profile according to account state.
+- Account Cycle Registry records which profile was used.
+
+### 21. Strategy Configuration Workspace
+
+Status: Planned
+
+Move strategy configuration out of the sidebar into its own app area/tab so the
+sidebar stays focused on high-level run controls.
+
+Acceptance criteria:
+
+- Dedicated strategy configuration tab or workspace.
+- Random and Stochastic parameters are easier to read and edit.
+- Current setup save/load still works.
+- Dashboard shows a compact strategy summary.
+
+### 22. Funding Preset Builder And Editor
+
+Status: Planned
+
+Allow creating and editing funding company presets from the app instead of only
+using fixed JSON files.
+
+Acceptance criteria:
+
+- User can create a preset from scratch.
+- User can edit a local custom preset.
+- Custom presets are saved outside tracked official presets.
+- App validates whether a custom preset is runnable.
+
+### 23. Funding Preset Templates
+
+Status: Planned
+
+Provide templates for common account structures so new presets can be created
+quickly and safely.
+
+Acceptance criteria:
+
+- Evaluation + funded template.
+- Straight-to-funded template.
+- Select-style payout template.
+- Lightning-style direct funded template.
+- Template output can be validated as runnable or show missing fields.
+
+### 24. Risk Of Ruin Visuals
+
+Status: Planned
 
 Make Monte Carlo results easier to interpret.
 
@@ -295,7 +391,7 @@ Acceptance criteria:
 - Show percentile bands.
 - Show required bankroll grid visually.
 
-### 19. Streak Diagnostics Visuals
+### 25. Streak Diagnostics Visuals
 
 Status: Planned
 
@@ -308,7 +404,7 @@ Acceptance criteria:
 - Show max droughts clearly.
 - Explain Z-score in the UI.
 
-### 20. Data Quality Report
+### 26. Data Quality Report
 
 Status: Planned
 
@@ -322,7 +418,7 @@ Acceptance criteria:
 - Show time-of-day coverage.
 - Show symbol and price range.
 
-### 21. NinjaTrader Converter UI
+### 27. NinjaTrader Converter UI
 
 Status: Planned
 
@@ -335,7 +431,7 @@ Acceptance criteria:
 - App writes standardized CSV to `data/market_data`.
 - App validates converted output.
 
-### 22. Strategy Presets
+### 28. Strategy Presets
 
 Status: Planned
 
@@ -347,7 +443,7 @@ Acceptance criteria:
 - User can load a strategy preset.
 - Strategy presets are local and ignored by git.
 
-### 23. Basic Optimization UI
+### 29. Basic Optimization UI
 
 Status: Planned
 
@@ -360,7 +456,7 @@ Acceptance criteria:
 - User can run against selected preset(s).
 - Results show top rows and export paths.
 
-### 24. Error Handling Pass
+### 30. Error Handling Pass
 
 Status: Planned
 
@@ -372,7 +468,7 @@ Acceptance criteria:
 - Full traceback is hidden unless user expands details.
 - Missing dependency and missing file messages are clear.
 
-### 25. App Smoke Test Script
+### 31. App Smoke Test Script
 
 Status: Planned
 
@@ -385,7 +481,6 @@ Acceptance criteria:
 - Runs the default analysis.
 - Checks expected tab text.
 - Stops Streamlit.
-
 ## Parking Lot
 
 These are valuable but should wait until the app workflow is stable:
@@ -396,3 +491,4 @@ These are valuable but should wait until the app workflow is stable:
 - Database-backed experiment history
 - Live trading or live NinjaTrader integration
 - Multi-user collaboration
+

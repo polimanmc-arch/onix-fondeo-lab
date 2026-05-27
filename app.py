@@ -378,6 +378,13 @@ def run_analysis(controls: dict[str, Any]) -> None:
     account_event_timeline = build_account_event_timeline(results)
     account_summary = build_account_summary(results)
     account_rule_audit = build_account_rule_audit(results)
+    account_cycle_registry = build_account_cycle_registry(
+        results=results,
+        preset=preset,
+        controls=controls,
+        config=config,
+        account_rule_audit=account_rule_audit,
+    )
 
     exported_files = export_app_outputs(
         trades,
@@ -395,6 +402,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         account_event_timeline,
         account_summary,
         account_rule_audit,
+        account_cycle_registry,
     )
     store_analysis_results(
         ohlc,
@@ -414,6 +422,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         account_event_timeline,
         account_summary,
         account_rule_audit,
+        account_cycle_registry,
     )
 
 
@@ -994,6 +1003,198 @@ def build_account_rule_audit(results: dict[str, Any]) -> list[dict[str, Any]]:
     return rows
 
 
+def build_account_cycle_registry(
+    results: dict[str, Any],
+    preset: dict[str, Any],
+    controls: dict[str, Any],
+    config: dict[str, Any],
+    account_rule_audit: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    trade_log = pd.DataFrame(results.get("trade_log", []))
+    rule_audit = pd.DataFrame(account_rule_audit)
+    rows: list[dict[str, Any]] = []
+    for cycle_number, account in enumerate(
+        sorted(
+            results.get("accounts", []),
+            key=lambda item: (item.account_id, 0 if item.phase == "EVALUATION" else 1),
+        ),
+        start=1,
+    ):
+        account_trades = _account_phase_rows(trade_log, account.account_id, account.phase)
+        account_rules = _account_phase_rows(rule_audit, account.account_id, account.phase)
+        rows.append(
+            account_cycle_registry_row(
+                cycle_number=cycle_number,
+                account=account,
+                account_trades=account_trades,
+                account_rules=account_rules,
+                preset=preset,
+                controls=controls,
+                config=config,
+            )
+        )
+    return rows
+
+
+def account_cycle_registry_row(
+    cycle_number: int,
+    account: Any,
+    account_trades: pd.DataFrame,
+    account_rules: pd.DataFrame,
+    preset: dict[str, Any],
+    controls: dict[str, Any],
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    phase_rules = config.get("evaluation", {}) if account.phase == "EVALUATION" else config.get("funded", {})
+    target_or_trigger = (
+        phase_rules.get("profit_target")
+        if account.phase == "EVALUATION"
+        else phase_rules.get("payout_trigger_profit")
+    )
+    max_drawdown = phase_rules.get("max_drawdown")
+    applied_pnl = _numeric_column(account_trades, "AppliedNetPnL")
+    original_pnl = _numeric_column(account_trades, "OriginalNetPnL")
+    wins = int((applied_pnl > 0).sum())
+    losses = int((applied_pnl < 0).sum())
+    payouts = getattr(account, "payouts", [])
+    daily_pnl = getattr(account, "daily_pnl", {})
+    session_stats = account_cycle_session_stats(account_trades)
+    rule_counts = account_cycle_rule_counts(account_rules)
+    row = {
+        "CycleNumber": cycle_number,
+        "PresetID": preset.get("preset_id"),
+        "Company": preset.get("company"),
+        "Plan": preset.get("plan"),
+        "AccountName": preset.get("account_name"),
+        "AccountSize": preset.get("account_size"),
+        "AccountID": account.account_id,
+        "Phase": account.phase,
+        "Status": account.status,
+        "ResultReason": account.result_reason,
+        "StartedAt": account.started_at,
+        "EndedAt": account.ended_at,
+        "CalendarDays": calendar_days_between(account.started_at, account.ended_at),
+        "TradingDays": len(getattr(account, "trading_days", set())),
+        "TradesCount": int(len(account_trades)) if not account_trades.empty else account.trades_count,
+        "Wins": wins,
+        "Losses": losses,
+        "WinRate": _safe_divide_number(wins, wins + losses),
+        "OriginalNetPnL": float(original_pnl.sum()) if not original_pnl.empty else 0.0,
+        "AppliedNetPnL": float(applied_pnl.sum()) if not applied_pnl.empty else 0.0,
+        "FinalPnL": account.pnl,
+        "HighWatermark": account.high_watermark,
+        "TargetOrPayoutTrigger": target_or_trigger,
+        "DistanceToTarget": distance_to_target(account.pnl, target_or_trigger),
+        "DistanceToDrawdown": distance_to_drawdown(account.pnl, max_drawdown, account.trailing_drawdown_floor),
+        "DrawdownFloor": account.trailing_drawdown_floor,
+        "EODHighPnL": account.eod_high_pnl,
+        "DrawdownLocked": account.drawdown_locked,
+        "BestDayPnL": max(daily_pnl.values()) if daily_pnl else 0.0,
+        "WorstDayPnL": min(daily_pnl.values()) if daily_pnl else 0.0,
+        "BestTradePnL": float(applied_pnl.max()) if not applied_pnl.empty else 0.0,
+        "WorstTradePnL": float(applied_pnl.min()) if not applied_pnl.empty else 0.0,
+        "PayoutsCount": len(payouts),
+        "TotalGrossPayout": sum(payout.gross_payout for payout in payouts),
+        "TotalNetPayout": sum(payout.net_payout for payout in payouts),
+        "Strategy": controls.get("strategy_name"),
+        "StrategyParams": json.dumps(controls.get("strategy_params", {}), default=str),
+        "Contracts": controls.get("contracts"),
+        "StopLossPoints": controls.get("stop_loss_points"),
+        "TakeProfitPoints": controls.get("take_profit_points"),
+        "MaxHoldingMinutes": controls.get("max_holding_minutes"),
+        "CommissionPerSide": controls.get("commission_per_side"),
+        "SlippagePoints": controls.get("slippage_points"),
+        "SpreadPoints": controls.get("spread_points"),
+        "MarketDataPath": controls.get("market_data_path"),
+        "Symbol": controls.get("symbol"),
+        "PointValue": controls.get("point_value"),
+    }
+    row.update(rule_counts)
+    row.update(session_stats)
+    return row
+
+
+def _account_phase_rows(dataframe: pd.DataFrame, account_id: Any, phase: str) -> pd.DataFrame:
+    if dataframe.empty or "AccountID" not in dataframe.columns or "Phase" not in dataframe.columns:
+        return pd.DataFrame()
+    return dataframe[
+        (dataframe["AccountID"] == account_id)
+        & (dataframe["Phase"].astype(str) == str(phase))
+    ].copy()
+
+
+def account_cycle_rule_counts(account_rules: pd.DataFrame) -> dict[str, int]:
+    rule_types = account_rules.get("RuleType", pd.Series(dtype=str)).astype(str)
+    return {
+        "AccountAwareExitsCount": int(rule_types.isin([
+            "EVALUATION_TARGET_REACHED",
+            "FUNDED_PAYOUT_TRIGGER_REACHED",
+            "ACCOUNT_MAX_LOSS",
+            "ACCOUNT_DAILY_LOSS",
+        ]).sum()),
+        "EvaluationTargetReachedCount": int((rule_types == "EVALUATION_TARGET_REACHED").sum()),
+        "FundedPayoutTriggerReachedCount": int((rule_types == "FUNDED_PAYOUT_TRIGGER_REACHED").sum()),
+        "MaxLossEventsCount": int((rule_types == "ACCOUNT_MAX_LOSS").sum()),
+        "DailyLossEventsCount": int((rule_types == "ACCOUNT_DAILY_LOSS").sum()),
+        "ConsistencyBlocksCount": int((rule_types == "PAYOUT_BLOCKED_CONSISTENCY").sum()),
+        "WinningDaysBlocksCount": int((rule_types == "PAYOUT_BLOCKED_WINNING_DAYS").sum()),
+        "DailyContinuityBlocksCount": int((rule_types == "PAYOUT_BLOCKED_DAILY_CONTINUITY").sum()),
+    }
+
+
+def account_cycle_session_stats(account_trades: pd.DataFrame) -> dict[str, float | int]:
+    stats: dict[str, float | int] = {}
+    sessions = ["Morning", "Midday", "Afternoon", "Evening", "Overnight"]
+    for session in sessions:
+        key = session.replace(" ", "")
+        stats[f"{key}Trades"] = 0
+        stats[f"{key}NetPnL"] = 0.0
+    if account_trades.empty:
+        return stats
+
+    trade_time = _datetime_column(account_trades, "TradeTime")
+    pnl = _numeric_column(account_trades, "AppliedNetPnL")
+    session_frame = pd.DataFrame(
+        {
+            "Session": trade_time.dt.hour.apply(classify_session_hour),
+            "AppliedNetPnL": pnl,
+        }
+    ).dropna(subset=["Session"])
+    for session, group in session_frame.groupby("Session"):
+        key = session.replace(" ", "")
+        stats[f"{key}Trades"] = int(len(group))
+        stats[f"{key}NetPnL"] = float(group["AppliedNetPnL"].sum())
+    return stats
+
+
+def distance_to_target(current_pnl: float, target: Any) -> float | None:
+    if target is None:
+        return None
+    return max(0.0, float(target) - float(current_pnl))
+
+
+def distance_to_drawdown(
+    current_pnl: float,
+    max_drawdown: Any,
+    drawdown_floor: Any,
+) -> float | None:
+    if drawdown_floor is not None and not pd.isna(drawdown_floor):
+        return float(current_pnl) - float(drawdown_floor)
+    if max_drawdown is None:
+        return None
+    return float(current_pnl) + abs(float(max_drawdown))
+
+
+def calendar_days_between(started_at: Any, ended_at: Any) -> int | None:
+    if started_at is None or ended_at is None:
+        return None
+    start = pd.to_datetime(started_at, errors="coerce")
+    end = pd.to_datetime(ended_at, errors="coerce")
+    if pd.isna(start) or pd.isna(end):
+        return None
+    return max(0, int((end.date() - start.date()).days) + 1)
+
+
 def account_rule_audit_row(
     time: Any,
     account_id: Any,
@@ -1174,6 +1375,7 @@ def store_analysis_results(
     account_event_timeline: list[dict[str, Any]] | None = None,
     account_summary: list[dict[str, Any]] | None = None,
     account_rule_audit: list[dict[str, Any]] | None = None,
+    account_cycle_registry: list[dict[str, Any]] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -1190,6 +1392,7 @@ def store_analysis_results(
         "account_event_timeline": account_event_timeline or [],
         "account_summary": account_summary or [],
         "account_rule_audit": account_rule_audit or [],
+        "account_cycle_registry": account_cycle_registry or [],
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -1664,6 +1867,8 @@ def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
         render_account_summary(analysis_state.get("account_summary", []))
     with st.expander("Account Rule Audit", expanded=True):
         render_account_rule_audit(analysis_state.get("account_rule_audit", []))
+    with st.expander("Account Cycle Registry", expanded=True):
+        render_account_cycle_registry(analysis_state.get("account_cycle_registry", []))
     with st.expander("Account Event Timeline", expanded=True):
         render_account_event_timeline(analysis_state.get("account_event_timeline", []))
     with st.expander("Bankroll", expanded=True):
@@ -1746,6 +1951,7 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
                 "market_data_summary": market_data_summary,
                 "account_summary": analysis_state.get("account_summary", []),
                 "account_rule_audit": analysis_state.get("account_rule_audit", []),
+                "account_cycle_registry": analysis_state.get("account_cycle_registry", []),
                 "account_event_timeline": analysis_state.get("account_event_timeline", []),
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
@@ -2011,6 +2217,93 @@ def format_account_rule_audit_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame
             )
     if "Time" in formatted.columns:
         formatted["Time"] = formatted["Time"].apply(_optional_datetime)
+    return formatted
+
+
+def render_account_cycle_registry(cycle_rows: list[dict[str, Any]]) -> None:
+    if not cycle_rows:
+        st.info("No account cycle registry is available for this run.")
+        return
+
+    registry = account_cycle_registry_dataframe(cycle_rows)
+    st.caption(
+        "One registry for the complete run. Each row is an account phase/cycle "
+        "in chronological simulation order."
+    )
+    columns = st.columns(4)
+    phase_options = ["All"] + sorted(registry["Phase"].dropna().astype(str).unique())
+    status_options = ["All"] + sorted(registry["Status"].dropna().astype(str).unique())
+    selected_phase = columns[0].selectbox("Cycle phase", options=phase_options, key="cycle_registry_phase")
+    selected_status = columns[1].selectbox("Cycle status", options=status_options, key="cycle_registry_status")
+    only_rule_events = columns[2].checkbox("Only cycles with rule events", value=False, key="cycle_registry_rules_only")
+    max_rows = columns[3].number_input(
+        "Cycle rows",
+        min_value=25,
+        max_value=1000,
+        value=200,
+        step=25,
+        key="cycle_registry_max_rows",
+    )
+
+    filtered = registry.copy()
+    if selected_phase != "All":
+        filtered = filtered[filtered["Phase"].astype(str) == selected_phase]
+    if selected_status != "All":
+        filtered = filtered[filtered["Status"].astype(str) == selected_status]
+    if only_rule_events:
+        filtered = filtered[pd.to_numeric(filtered["AccountAwareExitsCount"], errors="coerce").fillna(0) > 0]
+
+    st.dataframe(
+        format_account_cycle_registry_dataframe(filtered.head(int(max_rows))),
+        hide_index=True,
+        use_container_width=True,
+    )
+    st.download_button(
+        "Download account cycle registry CSV",
+        data=registry.to_csv(index=False),
+        file_name="account_cycle_registry.csv",
+        mime="text/csv",
+    )
+
+
+def account_cycle_registry_dataframe(cycle_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    return pd.DataFrame(cycle_rows)
+
+
+def format_account_cycle_registry_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
+    formatted = dataframe.copy()
+    currency_columns = [
+        "OriginalNetPnL",
+        "AppliedNetPnL",
+        "FinalPnL",
+        "HighWatermark",
+        "TargetOrPayoutTrigger",
+        "DistanceToTarget",
+        "DistanceToDrawdown",
+        "DrawdownFloor",
+        "EODHighPnL",
+        "BestDayPnL",
+        "WorstDayPnL",
+        "BestTradePnL",
+        "WorstTradePnL",
+        "TotalGrossPayout",
+        "TotalNetPayout",
+        "MorningNetPnL",
+        "MiddayNetPnL",
+        "AfternoonNetPnL",
+        "EveningNetPnL",
+        "OvernightNetPnL",
+    ]
+    for column in currency_columns:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(
+                lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
+            )
+    if "WinRate" in formatted.columns:
+        formatted["WinRate"] = formatted["WinRate"].apply(format_percent)
+    for column in ["StartedAt", "EndedAt"]:
+        if column in formatted.columns:
+            formatted[column] = formatted[column].apply(_optional_datetime)
     return formatted
 
 
@@ -3248,6 +3541,7 @@ def export_app_outputs(
     account_event_timeline: list[dict[str, Any]] | None = None,
     account_summary: list[dict[str, Any]] | None = None,
     account_rule_audit: list[dict[str, Any]] | None = None,
+    account_cycle_registry: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
     experiment_id = generate_experiment_id()
     run_dir = create_run_output_dir(experiment_id)
@@ -3279,6 +3573,7 @@ def export_app_outputs(
         "market_data_summary": market_data_summary,
         "account_summary": account_summary or [],
         "account_rule_audit": account_rule_audit or [],
+        "account_cycle_registry": account_cycle_registry or [],
         "account_event_timeline": account_event_timeline or [],
     }
     with files["summary_metrics"].open("w", encoding="utf-8") as file:
@@ -3302,6 +3597,12 @@ def export_app_outputs(
     if account_rule_audit:
         files["run_account_rule_audit"] = run_dir / "account_rule_audit.csv"
         pd.DataFrame(account_rule_audit).to_csv(files["run_account_rule_audit"], index=False)
+    if account_cycle_registry:
+        files["run_account_cycle_registry"] = run_dir / "account_cycle_registry.csv"
+        pd.DataFrame(account_cycle_registry).to_csv(
+            files["run_account_cycle_registry"],
+            index=False,
+        )
     if account_event_timeline:
         files["run_account_event_timeline"] = run_dir / "account_event_timeline.csv"
         pd.DataFrame(account_event_timeline).to_csv(
