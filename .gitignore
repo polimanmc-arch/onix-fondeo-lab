@@ -3,6 +3,8 @@ __pycache__/
 *.pyc
 data/output/
 data/app_setups/*.json
+data/runs/*
+!data/runs/.gitkeep
 .DS_Store
 .vscode/
 

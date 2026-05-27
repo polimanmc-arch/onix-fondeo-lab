@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+import json
 import pandas as pd
 from pathlib import Path
 import sys
@@ -31,7 +33,10 @@ from app import (
     format_account_summary_dataframe,
     format_bankroll_curve_dataframe,
     current_controls_snapshot,
+    create_run_output_dir,
+    export_app_outputs,
     format_rule_value,
+    generate_experiment_id,
     load_app_setup,
     market_data_file_options,
     market_data_option_label,
@@ -724,3 +729,74 @@ def test_format_bankroll_curve_dataframe_formats_amounts():
     assert formatted.loc[0, "bankroll"] == "$3,000.00"
     assert formatted.loc[1, "amount"] == "-$87.00"
     assert "EventLabel" not in formatted.columns
+
+
+def test_generate_experiment_id_includes_timestamp_and_unique_suffix():
+    experiment_id = generate_experiment_id(datetime(2026, 5, 27, 14, 30, 5))
+
+    assert experiment_id.startswith("20260527_143005_")
+    assert len(experiment_id.split("_")[-1]) == 8
+
+
+def test_create_run_output_dir_creates_expected_folder(tmp_path):
+    run_dir = create_run_output_dir("20260527_143005_abcdef12", runs_dir=tmp_path)
+
+    assert run_dir == tmp_path / "20260527_143005_abcdef12"
+    assert run_dir.is_dir()
+
+
+def test_export_app_outputs_writes_reproducible_run_artifacts(tmp_path, monkeypatch):
+    monkeypatch.setattr("app.OUTPUT_DIR", tmp_path / "output")
+    monkeypatch.setattr("app.RUNS_DIR", tmp_path / "runs")
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": "2024-01-02 09:30:00",
+                "ExitTime": "2024-01-02 09:40:00",
+                "NetPnL": 100,
+            }
+        ]
+    )
+    strategy_metrics = {"total_trades": 1, "net_pnl": 100}
+    business_metrics = {"net_business_pnl": 50}
+    streak_analysis = {"max_consecutive_no_payout_accounts": 0}
+
+    files = export_app_outputs(
+        trades,
+        strategy_metrics,
+        business_metrics,
+        bankroll_result={
+            "curve": [{"step": 0, "bankroll": 3000}],
+            "metrics": {"final_bankroll": 3000},
+        },
+        streak_analysis=streak_analysis,
+        risk_result={
+            "metrics": {"ruin_probability": 0},
+            "paths": [{"run": 1, "final_bankroll": 3100}],
+        },
+        required_bankroll={"grid_results": [{"bankroll": 3000, "ruin_probability": 0}]},
+        comparison_rows=[],
+        controls={"preset_id": "demo"},
+        preset={"preset_id": "demo"},
+        config={"evaluation": {"enabled": True}},
+        market_data_summary={"rows": 100},
+        account_event_timeline=[{"EventType": "ACCOUNT_OPENED", "AccountID": 1}],
+        account_summary=[{"AccountID": 1, "Phase": "EVALUATION", "Status": "PASSED"}],
+    )
+
+    assert files["run_folder"].is_dir()
+    assert files["run_generated_trades"].exists()
+    assert files["run_strategy_metrics"].exists()
+    assert files["run_business_metrics"].exists()
+    assert files["run_account_summary"].exists()
+    assert files["run_account_event_timeline"].exists()
+    assert files["run_bankroll_curve"].exists()
+    assert files["run_risk_of_ruin_metrics"].exists()
+    assert files["run_required_bankroll_grid"].exists()
+    assert files["run_streak_analysis"].exists()
+
+    summary = json.loads(files["run_summary_metrics"].read_text(encoding="utf-8"))
+    assert summary["strategy_metrics"]["total_trades"] == 1
+    assert summary["business_metrics"]["net_business_pnl"] == 50
+    assert summary["market_data_summary"]["rows"] == 100

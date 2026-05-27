@@ -158,7 +158,7 @@ Acceptance criteria:
 
 ### 11. Run Folder And Experiment ID
 
-Status: Next
+Status: Done
 
 Create a reproducible run folder for each analysis.
 
@@ -190,7 +190,7 @@ Acceptance criteria:
 
 ### 12. Full Run Manifest
 
-Status: Planned
+Status: Next
 
 Save a machine-readable manifest for each run.
 

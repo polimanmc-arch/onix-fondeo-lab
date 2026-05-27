@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 import sys
+from uuid import uuid4
 
 ROOT_DIR = Path(__file__).resolve().parent
 SRC_DIR = ROOT_DIR / "src"
@@ -39,6 +41,7 @@ from onix_fondeo.streaks import calculate_streak_analysis
 
 
 OUTPUT_DIR = Path("data/output")
+RUNS_DIR = Path("data/runs")
 MARKET_DATA_DIR = Path("data/market_data")
 APP_SETUPS_DIR = Path("data/app_setups")
 CUSTOM_MARKET_DATA_OPTION = "Custom path..."
@@ -382,6 +385,12 @@ def run_analysis(controls: dict[str, Any]) -> None:
         risk_result,
         required_bankroll,
         comparison_rows,
+        controls,
+        preset,
+        config,
+        market_data_summary,
+        account_event_timeline,
+        account_summary,
     )
     store_analysis_results(
         ohlc,
@@ -1422,6 +1431,15 @@ def render_funding_risk_tab(analysis_state: dict[str, Any]) -> None:
 
 
 def render_data_tab(analysis_state: dict[str, Any]) -> None:
+    st.subheader("Run Folder")
+    exported_files = analysis_state.get("exported_files", {})
+    run_folder = exported_files.get("run_folder")
+    if run_folder:
+        st.success("This analysis was saved as a reproducible run folder.")
+        st.code(str(run_folder))
+    else:
+        st.info("Run folder information is available after running a new analysis.")
+
     st.subheader("Input Configuration")
     st.dataframe(
         pd.DataFrame(_configuration_rows(analysis_state)),
@@ -1449,7 +1467,6 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
         st.info("Run an analysis or use the sidebar validator to inspect market data quality.")
 
     st.subheader("Generated Outputs")
-    exported_files = analysis_state.get("exported_files", {})
     output_rows = [
         {"Output": label, "Path": str(path), "Exists": Path(path).exists()}
         for label, path in exported_files.items()
@@ -2771,15 +2788,33 @@ def export_app_outputs(
     risk_result: dict[str, Any] | None,
     required_bankroll: dict[str, Any] | None,
     comparison_rows: list[dict[str, Any]] | None = None,
+    controls: dict[str, Any] | None = None,
+    preset: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+    market_data_summary: dict[str, Any] | None = None,
+    account_event_timeline: list[dict[str, Any]] | None = None,
+    account_summary: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
+    experiment_id = generate_experiment_id()
+    run_dir = create_run_output_dir(experiment_id)
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     files = {
+        "run_folder": run_dir,
         "generated_trades": OUTPUT_DIR / "app_generated_trades.csv",
         "summary_metrics": OUTPUT_DIR / "app_summary_metrics.json",
+        "run_generated_trades": run_dir / "generated_trades.csv",
+        "run_strategy_metrics": run_dir / "strategy_metrics.json",
+        "run_business_metrics": run_dir / "business_metrics.json",
+        "run_summary_metrics": run_dir / "summary_metrics.json",
+        "run_selected_setup": run_dir / "selected_setup.json",
+        "run_config_snapshot": run_dir / "config_snapshot.json",
     }
     trades.to_csv(files["generated_trades"], index=False)
+    trades.to_csv(files["run_generated_trades"], index=False)
 
     summary = {
+        "experiment_id": experiment_id,
+        "run_folder": str(run_dir),
         "strategy_metrics": strategy_metrics,
         "business_metrics": business_metrics,
         "bankroll_metrics": None if bankroll_result is None else bankroll_result["metrics"],
@@ -2787,23 +2822,102 @@ def export_app_outputs(
         "risk_of_ruin_metrics": None if risk_result is None else risk_result["metrics"],
         "required_bankroll": required_bankroll,
         "comparison_rows": comparison_rows or [],
+        "market_data_summary": market_data_summary,
+        "account_summary": account_summary or [],
+        "account_event_timeline": account_event_timeline or [],
     }
     with files["summary_metrics"].open("w", encoding="utf-8") as file:
         json.dump(summary, file, indent=2, default=str)
+    write_json_file(files["run_summary_metrics"], summary)
+    write_json_file(files["run_strategy_metrics"], strategy_metrics)
+    write_json_file(files["run_business_metrics"], business_metrics)
+    write_json_file(
+        files["run_selected_setup"],
+        {
+            "experiment_id": experiment_id,
+            "controls": controls or {},
+            "preset": preset or {},
+        },
+    )
+    write_json_file(files["run_config_snapshot"], config or {})
+
+    if account_summary:
+        files["run_account_summary"] = run_dir / "account_summary.csv"
+        pd.DataFrame(account_summary).to_csv(files["run_account_summary"], index=False)
+    if account_event_timeline:
+        files["run_account_event_timeline"] = run_dir / "account_event_timeline.csv"
+        pd.DataFrame(account_event_timeline).to_csv(
+            files["run_account_event_timeline"],
+            index=False,
+        )
+    if bankroll_result is not None:
+        files["run_bankroll_curve"] = run_dir / "bankroll_curve.csv"
+        pd.DataFrame(bankroll_result.get("curve", [])).to_csv(
+            files["run_bankroll_curve"],
+            index=False,
+        )
+        files["run_bankroll_metrics"] = run_dir / "bankroll_metrics.json"
+        write_json_file(files["run_bankroll_metrics"], bankroll_result.get("metrics", {}))
+    if risk_result is not None:
+        files["run_risk_of_ruin_metrics"] = run_dir / "risk_of_ruin_metrics.json"
+        write_json_file(files["run_risk_of_ruin_metrics"], risk_result.get("metrics", {}))
+        paths = risk_result.get("paths", [])
+        if paths:
+            files["run_risk_of_ruin_paths"] = run_dir / "risk_of_ruin_paths.csv"
+            pd.DataFrame(paths).to_csv(files["run_risk_of_ruin_paths"], index=False)
+    if required_bankroll is not None:
+        files["run_required_bankroll_grid"] = run_dir / "required_bankroll_grid.csv"
+        pd.DataFrame(required_bankroll.get("grid_results", [])).to_csv(
+            files["run_required_bankroll_grid"],
+            index=False,
+        )
+    if streak_analysis:
+        files["run_streak_analysis"] = run_dir / "streak_analysis.json"
+        write_json_file(files["run_streak_analysis"], streak_analysis)
+
     comparison_path = export_comparison_rows(comparison_rows or [], OUTPUT_DIR)
+    run_comparison_path = export_comparison_rows(
+        comparison_rows or [],
+        run_dir,
+        filename="preset_comparison.csv",
+    )
     if comparison_path is not None:
         files["preset_comparison"] = comparison_path
+    if run_comparison_path is not None:
+        files["run_preset_comparison"] = run_comparison_path
     return files
+
+
+def generate_experiment_id(timestamp: datetime | None = None) -> str:
+    timestamp = timestamp or datetime.now()
+    return f"{timestamp:%Y%m%d_%H%M%S}_{uuid4().hex[:8]}"
+
+
+def create_run_output_dir(
+    experiment_id: str,
+    runs_dir: Path | None = None,
+) -> Path:
+    runs_dir = runs_dir or RUNS_DIR
+    run_dir = runs_dir / experiment_id
+    run_dir.mkdir(parents=True, exist_ok=False)
+    return run_dir
+
+
+def write_json_file(path: Path, payload: Any) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as file:
+        json.dump(payload, file, indent=2, default=str)
 
 
 def export_comparison_rows(
     comparison_rows: list[dict[str, Any]],
     output_dir: Path = OUTPUT_DIR,
+    filename: str = "app_preset_comparison.csv",
 ) -> Path | None:
     if not comparison_rows:
         return None
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "app_preset_comparison.csv"
+    output_path = output_dir / filename
     comparison_rows_to_dataframe(comparison_rows).to_csv(output_path, index=False)
     return output_path
 
@@ -3446,6 +3560,7 @@ def _configuration_rows(analysis_state: dict[str, Any]) -> list[dict[str, Any]]:
     preset = analysis_state.get("selected_preset", {})
     input_config = analysis_state.get("input_configuration", {})
     rows = [
+        {"Setting": "Run folder", "Value": analysis_state.get("exported_files", {}).get("run_folder")},
         {"Setting": "Market data path", "Value": input_config.get("market_data_path")},
         {"Setting": "Preset ID", "Value": preset.get("preset_id")},
         {"Setting": "Company", "Value": preset.get("company")},

@@ -12,6 +12,7 @@ under `Unreleased` until a stable tag is created.
 - Streamlit app improvement roadmap.
 - Professional development workflow documentation.
 - Local check script for compile, tests, and staged market-data safety.
+- Streamlit run folders with unique experiment IDs and reproducible app artifacts.
 
 ### Notes
 
