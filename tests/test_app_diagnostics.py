@@ -9,11 +9,14 @@ if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
 from app import (
+    app_comparison_row,
     build_trade_diagnostics,
+    comparison_rows_to_dataframe,
     compute_stochastic_for_chart,
     filter_trades_for_explorer,
     filter_trades_for_chart,
     prepare_trade_pnl_chart_data,
+    preset_option_label,
 )
 
 
@@ -199,3 +202,53 @@ def test_compute_stochastic_for_chart_returns_k_and_d():
     assert {"DateTime", "K", "D"}.issubset(stochastic.columns)
     assert stochastic["K"].notna().any()
     assert stochastic["D"].notna().any()
+
+
+def test_preset_option_label_includes_hierarchical_context():
+    label = preset_option_label(
+        {
+            "preset_id": "tradeify_growth_50k",
+            "company": "Tradeify",
+            "plan": "Growth",
+            "account_size": 50000,
+        }
+    )
+
+    assert label == "Tradeify | Growth | 50K | tradeify_growth_50k"
+
+
+def test_app_comparison_row_includes_bankroll_and_risk_adjusted_score():
+    row = app_comparison_row(
+        preset={
+            "preset_id": "tradeify_growth_50k",
+            "company": "Tradeify",
+            "plan": "Growth",
+            "account_name": "50K Growth",
+            "account_size": 50000,
+        },
+        metrics={
+            "pass_rate": 0.5,
+            "payout_rate_on_evaluations": 0.25,
+            "payout_rate_on_passed": 0.5,
+            "total_net_payout": 900,
+            "net_business_pnl": 600,
+            "roi": 2.0,
+        },
+        bankroll_result={"metrics": {"final_bankroll": 3600}},
+        risk_result={"metrics": {"ruin_probability": 0.25}},
+    )
+
+    assert row["final_bankroll"] == 3600
+    assert row["ruin_probability"] == 0.25
+    assert row["risk_adjusted_score"] == 450
+
+
+def test_comparison_rows_to_dataframe_sorts_by_net_business_pnl():
+    rows = [
+        {"company": "B", "plan": "Two", "account_size": 50000, "net_business_pnl": -10},
+        {"company": "A", "plan": "One", "account_size": 50000, "net_business_pnl": 100},
+    ]
+
+    dataframe = comparison_rows_to_dataframe(rows)
+
+    assert dataframe["company"].tolist() == ["A", "B"]

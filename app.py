@@ -83,6 +83,30 @@ def sidebar_controls() -> dict[str, Any]:
         selected_preset_id = selected_preset["preset_id"]
         selected_preset_runnable = selected_preset["is_runnable"]
         render_selected_preset_info(selected_preset)
+        comparison_enabled = st.checkbox("Compare multiple presets", value=False)
+        comparison_preset_ids = []
+        if comparison_enabled:
+            runnable_presets = filter_presets_by_runnable(presets, show_non_runnable=False)
+            comparison_options = {
+                preset_option_label(preset): preset["preset_id"]
+                for preset in runnable_presets
+            }
+            default_labels = [
+                label
+                for label, preset_id in comparison_options.items()
+                if preset_id == selected_preset_id
+            ]
+            selected_comparison_labels = st.multiselect(
+                "Presets to compare",
+                options=list(comparison_options),
+                default=default_labels,
+                help="Uses the same generated trades for every selected runnable preset.",
+            )
+            comparison_preset_ids = [
+                comparison_options[label] for label in selected_comparison_labels
+            ]
+            if len(comparison_preset_ids) < 2:
+                st.caption("Select at least two presets for a meaningful comparison.")
 
         st.header("Strategy")
         strategy_name = st.selectbox(
@@ -147,6 +171,8 @@ def sidebar_controls() -> dict[str, Any]:
         "symbol": symbol,
         "point_value": point_value,
         "preset_id": selected_preset_id,
+        "comparison_enabled": comparison_enabled,
+        "comparison_preset_ids": comparison_preset_ids,
         "strategy_name": strategy_name,
         "strategy_params": strategy_params,
         "strategy_start_time": _blank_to_none(strategy_start_time),
@@ -257,6 +283,17 @@ def run_analysis(controls: dict[str, Any]) -> None:
             runs=max(1, min(controls["monte_carlo_runs"], 5000)),
             max_accounts=controls["monte_carlo_max_accounts"],
         )
+    comparison_rows = []
+    if controls.get("comparison_enabled"):
+        comparison_rows = run_app_preset_comparison(
+            trades=trades,
+            preset_ids=controls.get("comparison_preset_ids", []),
+            bankroll=controls.get("bankroll"),
+            monte_carlo_runs=controls.get("monte_carlo_runs", 0),
+            monte_carlo_max_accounts=controls.get("monte_carlo_max_accounts", 100),
+        )
+        if not comparison_rows:
+            st.warning("No runnable presets were available for comparison.")
 
     exported_files = export_app_outputs(
         trades,
@@ -280,6 +317,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
         preset,
         controls,
         config,
+        comparison_rows,
     )
 
 
@@ -308,6 +346,86 @@ def build_strategy(controls: dict[str, Any]):
     )
 
 
+def run_app_preset_comparison(
+    trades: pd.DataFrame,
+    preset_ids: list[str],
+    bankroll: float | None,
+    monte_carlo_runs: int,
+    monte_carlo_max_accounts: int,
+) -> list[dict[str, Any]]:
+    rows = []
+    for preset_id in preset_ids:
+        try:
+            preset = load_preset(preset_id)
+        except ValueError:
+            continue
+        is_runnable, _ = validate_preset_is_runnable(preset)
+        if not is_runnable:
+            continue
+
+        config = config_from_preset(preset)
+        results = simulate_funding(trades, config)
+        metrics = calculate_business_metrics(results, config)
+        bankroll_result = None
+        if bankroll is not None:
+            bankroll_result = calculate_bankroll_curve(
+                results["business_events"],
+                initial_bankroll=bankroll,
+                account_cost=_account_cost_from_config(config),
+            )
+        risk_result = None
+        if bankroll is not None and monte_carlo_runs > 0:
+            outcomes = extract_account_net_outcomes(results)
+            risk_result = run_monte_carlo_ruin_simulation(
+                outcomes,
+                initial_bankroll=bankroll,
+                account_cost=_account_cost_from_config(config),
+                runs=monte_carlo_runs,
+                max_accounts=monte_carlo_max_accounts,
+            )
+        rows.append(
+            app_comparison_row(
+                preset=preset,
+                metrics=metrics,
+                bankroll_result=bankroll_result,
+                risk_result=risk_result,
+            )
+        )
+    return rows
+
+
+def app_comparison_row(
+    preset: dict[str, Any],
+    metrics: dict[str, Any],
+    bankroll_result: dict[str, Any] | None = None,
+    risk_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    bankroll_metrics = None if bankroll_result is None else bankroll_result["metrics"]
+    risk_metrics = None if risk_result is None else risk_result["metrics"]
+    final_bankroll = None if bankroll_metrics is None else bankroll_metrics["final_bankroll"]
+    ruin_probability = None if risk_metrics is None else risk_metrics["ruin_probability"]
+    risk_adjusted_score = metrics["net_business_pnl"]
+    if ruin_probability is not None:
+        risk_adjusted_score = metrics["net_business_pnl"] * (1 - ruin_probability)
+
+    return {
+        "preset_id": preset.get("preset_id"),
+        "company": preset.get("company"),
+        "plan": preset.get("plan"),
+        "account_name": preset.get("account_name"),
+        "account_size": preset.get("account_size"),
+        "pass_rate": metrics.get("pass_rate", 0.0),
+        "payout_rate": metrics.get("payout_rate_on_evaluations", 0.0),
+        "payout_rate_on_passed": metrics.get("payout_rate_on_passed", 0.0),
+        "total_net_payout": metrics.get("total_net_payout", 0.0),
+        "net_business_pnl": metrics.get("net_business_pnl", 0.0),
+        "roi": metrics.get("roi", 0.0),
+        "final_bankroll": final_bankroll,
+        "ruin_probability": ruin_probability,
+        "risk_adjusted_score": risk_adjusted_score,
+    }
+
+
 def store_analysis_results(
     ohlc_df: pd.DataFrame,
     trades_df: pd.DataFrame,
@@ -321,6 +439,7 @@ def store_analysis_results(
     preset: dict[str, Any],
     controls: dict[str, Any],
     config: dict[str, Any],
+    comparison_rows: list[dict[str, Any]] | None = None,
 ) -> None:
     st.session_state["analysis_ran"] = True
     st.session_state["analysis"] = {
@@ -332,6 +451,7 @@ def store_analysis_results(
         "risk_of_ruin_result": risk_of_ruin_result,
         "required_bankroll_result": required_bankroll_result,
         "streak_analysis": streak_analysis,
+        "comparison_rows": comparison_rows or [],
         "exported_files": exported_files,
         "selected_preset": {
             "preset_id": preset.get("preset_id"),
@@ -359,6 +479,8 @@ def store_analysis_results(
             "bankroll": controls.get("bankroll"),
             "monte_carlo_runs": controls.get("monte_carlo_runs"),
             "monte_carlo_max_accounts": controls.get("monte_carlo_max_accounts"),
+            "comparison_enabled": controls.get("comparison_enabled"),
+            "comparison_preset_ids": controls.get("comparison_preset_ids", []),
         },
         "risk_settings": {
             "stop_loss_points": controls.get("stop_loss_points"),
@@ -453,6 +575,7 @@ def render_dashboard_tab(analysis_state: dict[str, Any]) -> None:
 
     st.subheader("Main Warnings / Insights")
     render_dashboard_insights(analysis_state)
+    render_comparison_summary(analysis_state.get("comparison_rows", []))
 
 
 def render_dashboard_insights(analysis_state: dict[str, Any]) -> None:
@@ -483,6 +606,69 @@ def render_dashboard_insights(analysis_state: dict[str, Any]) -> None:
         warnings_count += 1
     if warnings_count == 0:
         st.success("No major dashboard warnings detected for this run.")
+
+
+def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
+    if not comparison_rows:
+        return
+
+    st.subheader("Preset Comparison")
+    comparison_df = comparison_rows_to_dataframe(comparison_rows)
+    render_comparison_rankings(comparison_df)
+    st.dataframe(comparison_df, hide_index=True, use_container_width=True)
+
+
+def render_comparison_rankings(comparison_df: pd.DataFrame) -> None:
+    ranking_items = [
+        ("Best Net Business PnL", "net_business_pnl", format_currency_compact),
+        ("Best ROI", "roi", format_percent),
+        ("Best Final Bankroll", "final_bankroll", format_currency_compact),
+        ("Best Risk-Adjusted", "risk_adjusted_score", format_currency_compact),
+    ]
+    cards = []
+    for label, column, formatter in ranking_items:
+        if column not in comparison_df.columns:
+            cards.append((label, "N/A"))
+            continue
+        numeric_values = pd.to_numeric(comparison_df[column], errors="coerce")
+        if numeric_values.dropna().empty:
+            cards.append((label, "N/A"))
+            continue
+        best_row = comparison_df.loc[numeric_values.idxmax()]
+        cards.append(
+            (
+                label,
+                f"{best_row['company']} | {best_row['plan']} | "
+                f"{format_account_size(best_row['account_size'])} | "
+                f"{formatter(best_row[column])}",
+            )
+        )
+    render_metric_grid(cards, columns_per_row=2)
+
+
+def comparison_rows_to_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.DataFrame:
+    dataframe = pd.DataFrame(comparison_rows)
+    if dataframe.empty:
+        return dataframe
+    ordered_columns = [
+        "company",
+        "plan",
+        "account_size",
+        "pass_rate",
+        "payout_rate",
+        "total_net_payout",
+        "net_business_pnl",
+        "roi",
+        "final_bankroll",
+        "ruin_probability",
+        "risk_adjusted_score",
+        "preset_id",
+    ]
+    available_columns = [column for column in ordered_columns if column in dataframe.columns]
+    return dataframe[available_columns].sort_values(
+        "net_business_pnl",
+        ascending=False,
+    )
 
 
 def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
@@ -531,11 +717,20 @@ def render_data_tab(analysis_state: dict[str, Any]) -> None:
         st.dataframe(analysis_state["ohlc_df"].head(100), use_container_width=True)
     with st.expander("Generated Trades Preview", expanded=False):
         st.dataframe(analysis_state["trades_df"].head(100), use_container_width=True)
+    comparison_rows = analysis_state.get("comparison_rows", [])
+    if comparison_rows:
+        with st.expander("Preset Comparison Rows", expanded=False):
+            st.dataframe(
+                comparison_rows_to_dataframe(comparison_rows),
+                hide_index=True,
+                use_container_width=True,
+            )
     with st.expander("JSON Metrics", expanded=False):
         st.json(
             {
                 "strategy_metrics": analysis_state["strategy_metrics"],
                 "business_metrics": analysis_state["business_metrics"],
+                "comparison_rows": comparison_rows,
                 "bankroll_metrics": None
                 if analysis_state.get("bankroll_result") is None
                 else analysis_state["bankroll_result"]["metrics"],
@@ -1798,6 +1993,15 @@ def format_account_size(size: Any) -> str:
     if numeric_size % 1000 == 0:
         return f"{numeric_size // 1000}K"
     return f"{numeric_size:,}"
+
+
+def preset_option_label(preset: dict[str, Any]) -> str:
+    return (
+        f"{preset.get('company') or 'Unknown'} | "
+        f"{preset.get('plan') or 'Unknown'} | "
+        f"{format_account_size(preset.get('account_size'))} | "
+        f"{preset.get('preset_id')}"
+    )
 
 
 def get_runnable_preset_info(preset: dict[str, Any]) -> dict[str, Any]:
