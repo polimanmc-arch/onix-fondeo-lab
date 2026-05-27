@@ -18,6 +18,7 @@ from app import (
     build_direction_diagnostics_table,
     comparison_display_dataframe,
     comparison_chart_dataframe,
+    comparison_metric_extremes,
     comparison_preset_label,
     comparison_rows_to_dataframe,
     compute_stochastic_for_chart,
@@ -467,9 +468,9 @@ def test_comparison_display_dataframe_formats_readable_values():
 def test_filter_comparison_dataframe_filters_company_and_plan():
     dataframe = pd.DataFrame(
         [
-            {"company": "Tradeify", "plan": "Growth", "net_business_pnl": 100},
-            {"company": "Lucid Trading", "plan": "LucidFlex", "net_business_pnl": 50},
-            {"company": "Tradeify", "plan": "Select Flex", "net_business_pnl": 25},
+            {"company": "Tradeify", "plan": "Growth", "account_size": 50000, "net_business_pnl": 100},
+            {"company": "Lucid Trading", "plan": "LucidFlex", "account_size": 50000, "net_business_pnl": 50},
+            {"company": "Tradeify", "plan": "Select Flex", "account_size": 100000, "net_business_pnl": 25},
         ]
     )
 
@@ -477,9 +478,63 @@ def test_filter_comparison_dataframe_filters_company_and_plan():
         dataframe,
         companies=["Tradeify"],
         plans=["Growth"],
+        account_sizes=[50000],
     )
 
     assert filtered["plan"].tolist() == ["Growth"]
+
+
+def test_filter_comparison_dataframe_filters_account_size():
+    dataframe = pd.DataFrame(
+        [
+            {"company": "Tradeify", "plan": "Growth", "account_size": 50000},
+            {"company": "Tradeify", "plan": "Growth", "account_size": 100000},
+        ]
+    )
+
+    filtered = filter_comparison_dataframe(dataframe, account_sizes=[100000])
+
+    assert filtered["account_size"].tolist() == [100000]
+
+
+def test_comparison_metric_extremes_returns_best_and_worst():
+    dataframe = pd.DataFrame(
+        [
+            {"company": "A", "plan": "One", "account_size": 50000, "net_business_pnl": 100},
+            {"company": "B", "plan": "Two", "account_size": 50000, "net_business_pnl": -50},
+        ]
+    )
+
+    rows = comparison_metric_extremes(
+        dataframe,
+        "net_business_pnl",
+        lambda value: f"{value}",
+        higher_is_better=True,
+    )
+
+    assert rows[0]["Rank"] == "Best"
+    assert rows[0]["Preset"] == "A | One | 50K"
+    assert rows[1]["Rank"] == "Worst"
+    assert rows[1]["Preset"] == "B | Two | 50K"
+
+
+def test_comparison_metric_extremes_handles_lower_is_better():
+    dataframe = pd.DataFrame(
+        [
+            {"company": "A", "plan": "One", "account_size": 50000, "ruin_probability": 0.2},
+            {"company": "B", "plan": "Two", "account_size": 50000, "ruin_probability": 0.05},
+        ]
+    )
+
+    rows = comparison_metric_extremes(
+        dataframe,
+        "ruin_probability",
+        lambda value: f"{value}",
+        higher_is_better=False,
+    )
+
+    assert rows[0]["Preset"] == "B | Two | 50K"
+    assert rows[1]["Preset"] == "A | One | 50K"
 
 
 def test_comparison_chart_dataframe_sorts_and_labels_top_rows():

@@ -1363,7 +1363,9 @@ def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
         st.warning("No comparison rows match the selected filters.")
         return
     render_comparison_rankings(filtered_df)
+    render_comparison_best_worst_cards(filtered_df)
     render_comparison_visual_rankings(filtered_df)
+    render_comparison_detail_view(filtered_df)
     st.dataframe(
         format_comparison_dataframe(filtered_df),
         hide_index=True,
@@ -1378,11 +1380,13 @@ def render_comparison_summary(comparison_rows: list[dict[str, Any]]) -> None:
 
 
 def render_comparison_filters(comparison_df: pd.DataFrame) -> pd.DataFrame:
-    columns = st.columns(2)
+    columns = st.columns(3)
     company_options = sorted(comparison_df["company"].dropna().astype(str).unique())
     plan_options = sorted(comparison_df["plan"].dropna().astype(str).unique())
+    size_options = sorted(pd.to_numeric(comparison_df["account_size"], errors="coerce").dropna().astype(int).unique())
     _ensure_multiselect_choices("comparison_company_filter", company_options)
     _ensure_multiselect_choices("comparison_plan_filter", plan_options)
+    _ensure_multiselect_choices("comparison_size_filter", list(size_options))
     selected_companies = columns[0].multiselect(
         "Filter companies",
         options=company_options,
@@ -1395,10 +1399,18 @@ def render_comparison_filters(comparison_df: pd.DataFrame) -> pd.DataFrame:
         default=plan_options,
         key="comparison_plan_filter",
     )
+    selected_sizes = columns[2].multiselect(
+        "Filter account sizes",
+        options=list(size_options),
+        default=list(size_options),
+        format_func=format_account_size,
+        key="comparison_size_filter",
+    )
     return filter_comparison_dataframe(
         comparison_df,
         companies=selected_companies,
         plans=selected_plans,
+        account_sizes=selected_sizes,
     )
 
 
@@ -1406,12 +1418,16 @@ def filter_comparison_dataframe(
     comparison_df: pd.DataFrame,
     companies: list[str] | None = None,
     plans: list[str] | None = None,
+    account_sizes: list[int] | None = None,
 ) -> pd.DataFrame:
     filtered = comparison_df.copy()
     if companies is not None:
         filtered = filtered[filtered["company"].astype(str).isin(companies)]
     if plans is not None:
         filtered = filtered[filtered["plan"].astype(str).isin(plans)]
+    if account_sizes is not None and "account_size" in filtered.columns:
+        numeric_size = pd.to_numeric(filtered["account_size"], errors="coerce")
+        filtered = filtered[numeric_size.isin(account_sizes)]
     return filtered
 
 
@@ -1443,6 +1459,31 @@ def render_comparison_rankings(comparison_df: pd.DataFrame) -> None:
     render_metric_grid(cards, columns_per_row=2)
 
 
+def render_comparison_best_worst_cards(comparison_df: pd.DataFrame) -> None:
+    with st.expander("Best / Worst Presets", expanded=True):
+        metrics = [
+            ("Net Business PnL", "net_business_pnl", format_currency_compact, True),
+            ("ROI", "roi", format_percent, True),
+            ("Total Net Payout", "total_net_payout", format_currency_compact, True),
+            ("Final Bankroll", "final_bankroll", format_currency_compact, True),
+            ("Risk of Ruin", "ruin_probability", format_percent, False),
+        ]
+        rows = []
+        for label, column, formatter, higher_is_better in metrics:
+            summary = comparison_metric_extremes(
+                comparison_df,
+                column,
+                formatter,
+                higher_is_better=higher_is_better,
+            )
+            if summary is not None:
+                rows.extend(summary)
+        if rows:
+            st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
+        else:
+            st.info("No comparable numeric metrics are available.")
+
+
 def render_comparison_visual_rankings(comparison_df: pd.DataFrame) -> None:
     chart_metrics = [
         ("Net Business PnL", "net_business_pnl"),
@@ -1457,6 +1498,70 @@ def render_comparison_visual_rankings(comparison_df: pd.DataFrame) -> None:
                 continue
             st.caption(title)
             st.bar_chart(chart_df.set_index("Preset")[metric])
+
+
+def render_comparison_detail_view(comparison_df: pd.DataFrame) -> None:
+    with st.expander("Comparison Detail View", expanded=False):
+        metric_options = [
+            "net_business_pnl",
+            "roi",
+            "total_net_payout",
+            "final_bankroll",
+            "ruin_probability",
+            "risk_adjusted_score",
+            "pass_rate",
+            "payout_rate",
+        ]
+        available_metrics = [metric for metric in metric_options if metric in comparison_df.columns]
+        if not available_metrics:
+            st.info("No comparison metrics are available for detail ranking.")
+            return
+        selected_metric = st.selectbox(
+            "Rank by",
+            options=available_metrics,
+            index=0,
+            key="comparison_detail_rank_metric",
+        )
+        ascending = selected_metric == "ruin_probability"
+        detail = comparison_df.copy()
+        detail[selected_metric] = pd.to_numeric(detail[selected_metric], errors="coerce")
+        detail = detail.sort_values(selected_metric, ascending=ascending, na_position="last")
+        st.dataframe(
+            format_comparison_dataframe(detail),
+            hide_index=True,
+            use_container_width=True,
+        )
+
+
+def comparison_metric_extremes(
+    comparison_df: pd.DataFrame,
+    metric: str,
+    formatter,
+    higher_is_better: bool = True,
+) -> list[dict[str, str]] | None:
+    if metric not in comparison_df.columns:
+        return None
+    numeric_values = pd.to_numeric(comparison_df[metric], errors="coerce")
+    if numeric_values.dropna().empty:
+        return None
+    best_index = numeric_values.idxmax() if higher_is_better else numeric_values.idxmin()
+    worst_index = numeric_values.idxmin() if higher_is_better else numeric_values.idxmax()
+    best_row = comparison_df.loc[best_index]
+    worst_row = comparison_df.loc[worst_index]
+    return [
+        {
+            "Metric": metric,
+            "Rank": "Best",
+            "Preset": comparison_preset_label(best_row),
+            "Value": formatter(best_row[metric]),
+        },
+        {
+            "Metric": metric,
+            "Rank": "Worst",
+            "Preset": comparison_preset_label(worst_row),
+            "Value": formatter(worst_row[metric]),
+        },
+    ]
 
 
 def comparison_chart_dataframe(
@@ -1489,9 +1594,11 @@ def comparison_rows_to_dataframe(comparison_rows: list[dict[str, Any]]) -> pd.Da
     ordered_columns = [
         "company",
         "plan",
+        "account_name",
         "account_size",
         "pass_rate",
         "payout_rate",
+        "payout_rate_on_passed",
         "total_net_payout",
         "net_business_pnl",
         "roi",
@@ -1524,6 +1631,7 @@ def format_comparison_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
     percent_columns = [
         "pass_rate",
         "payout_rate",
+        "payout_rate_on_passed",
         "roi",
         "ruin_probability",
     ]

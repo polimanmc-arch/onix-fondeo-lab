@@ -271,7 +271,7 @@ Acceptance criteria:
 
 ### 17. Preset Comparison Detail View
 
-Status: Next
+Status: Done
 
 Add a richer comparison section for presets.
 
@@ -284,7 +284,7 @@ Acceptance criteria:
 
 ### 18. Risk Of Ruin Visuals
 
-Status: Planned
+Status: Next
 
 Make Monte Carlo results easier to interpret.
 
