@@ -29,6 +29,7 @@ from app import (
     build_run_manifest,
     build_account_event_timeline,
     build_preset_rules_summary,
+    classify_session_hour,
     account_event_timeline_dataframe,
     account_summary_dataframe,
     build_account_summary,
@@ -39,6 +40,7 @@ from app import (
     create_run_output_dir,
     export_app_outputs,
     format_rule_value,
+    session_sort_order,
     generate_experiment_id,
     load_app_setup,
     market_data_file_options,
@@ -187,6 +189,44 @@ def test_build_trade_diagnostics_exit_reason_table():
     assert tp_row["Trades"] == 2
     assert tp_row["NetPnL"] == 150
     assert tp_row["AverageNetPnL"] == 75
+
+
+def test_build_trade_diagnostics_time_of_day_tables():
+    trades = pd.DataFrame(
+        [
+            {"ExitTime": "2024-01-01 09:40:00", "NetPnL": 100, "TotalCost": 5},
+            {"ExitTime": "2024-01-01 12:15:00", "NetPnL": -30, "TotalCost": 5},
+            {"ExitTime": "2024-01-02 15:00:00", "NetPnL": 50, "TotalCost": 2},
+            {"ExitTime": "2024-01-03 21:00:00", "NetPnL": -10, "TotalCost": 1},
+        ]
+    )
+
+    diagnostics = build_trade_diagnostics(trades)
+    hourly_table = diagnostics["hourly_table"]
+    weekday_table = diagnostics["weekday_table"]
+    session_table = diagnostics["session_table"]
+
+    assert hourly_table["Hour"].tolist() == [9, 12, 15, 21]
+    assert "AverageNetPnL" in hourly_table.columns
+    assert weekday_table["Weekday"].tolist() == ["Monday", "Tuesday", "Wednesday"]
+    assert session_table["Session"].tolist() == [
+        "Overnight",
+        "Morning",
+        "Midday",
+        "Afternoon",
+    ]
+    morning_row = session_table[session_table["Session"] == "Morning"].iloc[0]
+    assert morning_row["Trades"] == 1
+    assert morning_row["NetPnL"] == 100
+
+
+def test_classify_session_hour_and_sort_order():
+    assert classify_session_hour(9) == "Morning"
+    assert classify_session_hour(12) == "Midday"
+    assert classify_session_hour(14) == "Afternoon"
+    assert classify_session_hour(17) == "Evening"
+    assert classify_session_hour(2) == "Overnight"
+    assert session_sort_order(2) < session_sort_order(9)
 
 
 def test_prepare_trade_pnl_chart_data_adds_cumulative_pnl():

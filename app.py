@@ -2030,7 +2030,10 @@ def render_diagnostics_tab(
     if not hourly_table.empty:
         with st.expander("Hourly Diagnostics", expanded=False):
             st.dataframe(
-                _format_diagnostic_money_columns(hourly_table, ["NetPnL", "TotalCost"]),
+                _format_diagnostic_money_columns(
+                    hourly_table,
+                    ["NetPnL", "AverageNetPnL", "TotalCost"],
+                ),
                 use_container_width=True,
             )
             st.caption("Trades by hour")
@@ -2038,11 +2041,48 @@ def render_diagnostics_tab(
             st.caption("Net PnL by hour")
             st.bar_chart(hourly_table.set_index("Hour")["NetPnL"])
 
+    session_table = diagnostics["session_table"]
+    if not session_table.empty:
+        with st.expander("Session Diagnostics", expanded=False):
+            st.caption(
+                "Sessions are diagnostic buckets based on trade ExitTime. "
+                "No timezone conversion is applied."
+            )
+            st.dataframe(
+                _format_diagnostic_money_columns(
+                    session_table,
+                    ["NetPnL", "AverageNetPnL", "TotalCost"],
+                ),
+                use_container_width=True,
+            )
+            st.caption("Trades by session")
+            st.bar_chart(session_table.set_index("Session")["Trades"])
+            st.caption("Net PnL by session")
+            st.bar_chart(session_table.set_index("Session")["NetPnL"])
+
+    weekday_table = diagnostics["weekday_table"]
+    if not weekday_table.empty:
+        with st.expander("Day-of-Week Diagnostics", expanded=False):
+            st.dataframe(
+                _format_diagnostic_money_columns(
+                    weekday_table,
+                    ["NetPnL", "AverageNetPnL", "TotalCost"],
+                ),
+                use_container_width=True,
+            )
+            st.caption("Trades by weekday")
+            st.bar_chart(weekday_table.set_index("Weekday")["Trades"])
+            st.caption("Net PnL by weekday")
+            st.bar_chart(weekday_table.set_index("Weekday")["NetPnL"])
+
     daily_table = diagnostics["daily_table"]
     if not daily_table.empty:
         with st.expander("Daily Diagnostics", expanded=False):
             st.dataframe(
-                _format_diagnostic_money_columns(daily_table, ["NetPnL", "TotalCost"]),
+                _format_diagnostic_money_columns(
+                    daily_table,
+                    ["NetPnL", "AverageNetPnL", "TotalCost"],
+                ),
                 use_container_width=True,
             )
             st.caption("Trades by date")
@@ -3108,6 +3148,8 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
             "exit_reason_table": pd.DataFrame(),
             "hourly_table": pd.DataFrame(),
             "daily_table": pd.DataFrame(),
+            "weekday_table": pd.DataFrame(),
+            "session_table": pd.DataFrame(),
             "best_day": None,
             "worst_day": None,
         }
@@ -3183,6 +3225,8 @@ def build_trade_diagnostics(trades_df: pd.DataFrame) -> dict[str, Any]:
         "exit_reason_table": _exit_reason_diagnostics_table(trades, net_pnl),
         "hourly_table": _hourly_diagnostics_table(trades, exit_time, net_pnl, total_cost),
         "daily_table": daily_table,
+        "weekday_table": _weekday_diagnostics_table(trades, exit_time, net_pnl, total_cost),
+        "session_table": _session_diagnostics_table(trades, exit_time, net_pnl, total_cost),
         "best_day": best_day,
         "worst_day": worst_day,
     }
@@ -3301,7 +3345,12 @@ def _hourly_diagnostics_table(
     table["Hour"] = table["Hour"].astype(int)
     return (
         table.groupby("Hour")
-        .agg(Trades=("NetPnL", "size"), NetPnL=("NetPnL", "sum"), TotalCost=("TotalCost", "sum"))
+        .agg(
+            Trades=("NetPnL", "size"),
+            NetPnL=("NetPnL", "sum"),
+            AverageNetPnL=("NetPnL", "mean"),
+            TotalCost=("TotalCost", "sum"),
+        )
         .reset_index()
         .sort_values("Hour")
     )
@@ -3328,10 +3377,112 @@ def _daily_diagnostics_table(
 
     return (
         table.groupby("Date")
-        .agg(Trades=("NetPnL", "size"), NetPnL=("NetPnL", "sum"), TotalCost=("TotalCost", "sum"))
+        .agg(
+            Trades=("NetPnL", "size"),
+            NetPnL=("NetPnL", "sum"),
+            AverageNetPnL=("NetPnL", "mean"),
+            TotalCost=("TotalCost", "sum"),
+        )
         .reset_index()
         .sort_values("Date")
     )
+
+
+def _weekday_diagnostics_table(
+    trades: pd.DataFrame,
+    exit_time: pd.Series,
+    net_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> pd.DataFrame:
+    columns = ["Weekday", "Trades", "NetPnL", "AverageNetPnL", "TotalCost"]
+    if exit_time.isna().all():
+        return pd.DataFrame(columns=columns)
+
+    table = pd.DataFrame(
+        {
+            "Weekday": exit_time.dt.day_name(),
+            "WeekdayNumber": exit_time.dt.dayofweek,
+            "NetPnL": net_pnl,
+            "TotalCost": total_cost,
+        }
+    ).dropna(subset=["Weekday"])
+    if table.empty:
+        return pd.DataFrame(columns=columns)
+
+    grouped = (
+        table.groupby(["WeekdayNumber", "Weekday"])
+        .agg(
+            Trades=("NetPnL", "size"),
+            NetPnL=("NetPnL", "sum"),
+            AverageNetPnL=("NetPnL", "mean"),
+            TotalCost=("TotalCost", "sum"),
+        )
+        .reset_index()
+        .sort_values("WeekdayNumber")
+    )
+    return grouped[columns]
+
+
+def _session_diagnostics_table(
+    trades: pd.DataFrame,
+    exit_time: pd.Series,
+    net_pnl: pd.Series,
+    total_cost: pd.Series,
+) -> pd.DataFrame:
+    columns = ["Session", "Trades", "NetPnL", "AverageNetPnL", "TotalCost"]
+    if exit_time.isna().all():
+        return pd.DataFrame(columns=columns)
+
+    table = pd.DataFrame(
+        {
+            "Session": exit_time.dt.hour.apply(classify_session_hour),
+            "SessionOrder": exit_time.dt.hour.apply(session_sort_order),
+            "NetPnL": net_pnl,
+            "TotalCost": total_cost,
+        }
+    ).dropna(subset=["Session"])
+    if table.empty:
+        return pd.DataFrame(columns=columns)
+
+    grouped = (
+        table.groupby(["SessionOrder", "Session"])
+        .agg(
+            Trades=("NetPnL", "size"),
+            NetPnL=("NetPnL", "sum"),
+            AverageNetPnL=("NetPnL", "mean"),
+            TotalCost=("TotalCost", "sum"),
+        )
+        .reset_index()
+        .sort_values("SessionOrder")
+    )
+    return grouped[columns]
+
+
+def classify_session_hour(hour: Any) -> str:
+    if pd.isna(hour):
+        return "Unknown"
+    hour = int(hour)
+    if 9 <= hour < 12:
+        return "Morning"
+    if 12 <= hour < 14:
+        return "Midday"
+    if 14 <= hour < 17:
+        return "Afternoon"
+    if 17 <= hour < 20:
+        return "Evening"
+    return "Overnight"
+
+
+def session_sort_order(hour: Any) -> int:
+    order = {
+        "Overnight": 0,
+        "Morning": 1,
+        "Midday": 2,
+        "Afternoon": 3,
+        "Evening": 4,
+        "Unknown": 5,
+    }
+    return order[classify_session_hour(hour)]
 
 
 def _numeric_column(trades: pd.DataFrame, column: str) -> pd.Series:

@@ -230,7 +230,7 @@ Acceptance criteria:
 
 ### 14. Session And Time-Of-Day Diagnostics
 
-Status: Next
+Status: Done
 
 Improve time diagnostics into product-quality sections.
 
@@ -244,7 +244,7 @@ Acceptance criteria:
 
 ### 15. Cost Sensitivity View
 
-Status: Planned
+Status: Next
 
 Compare strategy results with and without trading costs.
 

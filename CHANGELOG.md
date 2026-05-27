@@ -15,6 +15,7 @@ under `Unreleased` until a stable tag is created.
 - Streamlit run folders with unique experiment IDs and reproducible app artifacts.
 - Full Streamlit run manifest with git, setup, strategy, risk, cost, and artifact metadata.
 - Streamlit Long vs Short strategy diagnostics in the Backtest tab.
+- Streamlit session, weekday, hourly, and daily time-of-day diagnostics.
 
 ### Notes
 
