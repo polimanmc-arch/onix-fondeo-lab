@@ -1573,46 +1573,18 @@ def render_empty_app_tabs() -> None:
 
 
 def render_results_tab_selector() -> str:
-    inject_persistent_tab_css()
     tab_options = ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
     _ensure_widget_choice("active_results_tab", tab_options, "Dashboard")
-    active_tab = st.radio(
+    active_tab = st.segmented_control(
         "Results tabs",
         options=tab_options,
-        horizontal=True,
+        default=st.session_state.get("active_results_tab", "Dashboard"),
         key="active_results_tab",
+        width="stretch",
         label_visibility="collapsed",
     )
     st.divider()
-    return active_tab
-
-
-def inject_persistent_tab_css() -> None:
-    st.markdown(
-        """
-        <style>
-        div[role="radiogroup"] {
-            gap: 0;
-        }
-        div[role="radiogroup"] > label {
-            padding: 8px 20px;
-            border: 1px solid #ddd;
-            border-bottom: none;
-            border-radius: 6px 6px 0 0;
-            margin-right: 4px;
-            background: #f7f7f7;
-            cursor: pointer;
-            font-weight: 500;
-        }
-        div[role="radiogroup"] > label:has(input:checked) {
-            background: white;
-            border-bottom: 2px solid white;
-            color: #0f52ba;
-        }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    return active_tab or "Dashboard"
 
 
 def render_outputs(
