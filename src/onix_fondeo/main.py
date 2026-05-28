@@ -53,13 +53,20 @@ def main():
     trades, strategy_metrics = load_or_generate_trades(args)
 
     if args.compare:
-        run_comparison(args.compare, trades, bankroll=args.bankroll)
+        run_comparison(
+            args.compare,
+            trades,
+            bankroll=args.bankroll,
+            pass_wait_minutes=args.pass_wait_minutes,
+            fail_wait_minutes=args.fail_wait_minutes,
+        )
         return
 
     config = load_config(args.preset)
 
     if config is None:
         return
+    apply_simulation_wait_settings(config, args)
 
     results = simulate_funding(trades, config)
     metrics = calculate_business_metrics(results, config)
@@ -296,6 +303,18 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--force-close-time",
         help='Optional time-of-day force close, for example "15:55".',
+    )
+    parser.add_argument(
+        "--pass-wait-minutes",
+        type=int,
+        default=0,
+        help="Minutes to wait before trading a funded account after an evaluation pass.",
+    )
+    parser.add_argument(
+        "--fail-wait-minutes",
+        type=int,
+        default=0,
+        help="Minutes to wait before trading a new evaluation after an account failure/pass recycle.",
     )
     parser.add_argument(
         "--use-phase-profiles",
@@ -644,7 +663,13 @@ def _format_metric(value: float) -> str:
     return f"{value:.2f}"
 
 
-def run_comparison(preset_ids: list[str], trades: object, bankroll: float | None = None) -> None:
+def run_comparison(
+    preset_ids: list[str],
+    trades: object,
+    bankroll: float | None = None,
+    pass_wait_minutes: int = 0,
+    fail_wait_minutes: int = 0,
+) -> None:
     comparison_rows = []
     skipped_presets = []
 
@@ -668,6 +693,13 @@ def run_comparison(preset_ids: list[str], trades: object, bankroll: float | None
             continue
 
         config = config_from_preset(preset)
+        apply_simulation_wait_settings(
+            config,
+            argparse.Namespace(
+                pass_wait_minutes=pass_wait_minutes,
+                fail_wait_minutes=fail_wait_minutes,
+            ),
+        )
         results = simulate_funding(trades, config)
         metrics = calculate_business_metrics(results, config)
         bankroll_result = _calculate_bankroll_result(bankroll, results, config)
@@ -820,6 +852,12 @@ def load_config(preset_id: str | None) -> dict | None:
     print(f"Source verified: {preset.get('is_official')}")
     print(f"Rules verified: {preset.get('rules_verified')}")
     return config_from_preset(preset)
+
+
+def apply_simulation_wait_settings(config: dict, args: argparse.Namespace) -> None:
+    simulation = config.setdefault("simulation", {})
+    simulation["pass_transition_wait_minutes"] = args.pass_wait_minutes
+    simulation["fail_transition_wait_minutes"] = args.fail_wait_minutes
 
 
 def print_presets() -> None:

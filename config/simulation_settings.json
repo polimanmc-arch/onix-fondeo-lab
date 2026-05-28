@@ -1,5 +1,7 @@
 {
   "max_accounts": 100,
   "recycle_failed_accounts": true,
-  "continue_after_pass": true
+  "continue_after_pass": true,
+  "pass_transition_wait_minutes": 0,
+  "fail_transition_wait_minutes": 0
 }

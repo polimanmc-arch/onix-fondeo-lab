@@ -998,6 +998,7 @@ def test_build_account_cycle_registry_creates_run_level_cycle_rows():
     assert row["CycleNumber"] == 1
     assert row["PresetID"] == "tradeify_growth_50k"
     assert row["Phase"] == "FUNDED"
+    assert row["EarliestTradeTime"] is None
     assert row["TradesCount"] == 2
     assert row["Wins"] == 2
     assert row["AppliedNetPnL"] == 750

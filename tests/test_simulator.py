@@ -5,6 +5,47 @@ import pandas as pd
 from onix_fondeo.simulator import simulate_funding
 
 
+def _timed_trade_row(trade_id: int, entry_time: str, exit_time: str, net_pnl: float) -> dict:
+    return {
+        "TradeID": trade_id,
+        "EntryTime": pd.Timestamp(entry_time),
+        "ExitTime": pd.Timestamp(exit_time),
+        "Symbol": "NQ",
+        "Direction": "Long",
+        "Quantity": 1,
+        "NetPnL": net_pnl,
+    }
+
+
+def _transition_wait_config() -> dict:
+    return {
+        "evaluation": {
+            "evaluation_cost": 100,
+            "profit_target": 1000,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_trading_days": 1,
+            "daily_profit_cap": None,
+            "consistency_enabled": False,
+            "consistency_percent": None,
+        },
+        "funded": {
+            "enabled": True,
+            "max_drawdown": 2000,
+            "max_daily_loss": None,
+            "minimum_withdrawable_profit": 1000,
+            "payout_trigger_profit": 5000,
+            "profit_split": 0.9,
+            "reset_after_payout": False,
+        },
+        "simulation": {
+            "max_accounts": 10,
+            "recycle_failed_accounts": True,
+            "continue_after_pass": False,
+        },
+    }
+
+
 def test_simulate_funding_returns_logs_and_creates_funded_account_on_pass():
     trades = pd.DataFrame(
         [
@@ -65,6 +106,128 @@ def test_simulate_funding_returns_logs_and_creates_funded_account_on_pass():
         for event in results["business_events"]
     )
     assert any(account.phase == "FUNDED" for account in results["accounts"])
+
+
+def test_transition_wait_zero_preserves_current_behavior():
+    trades = pd.DataFrame(
+        [
+            {
+                "TradeID": 1,
+                "EntryTime": datetime(2026, 5, 20, 9, 30),
+                "ExitTime": datetime(2026, 5, 20, 10, 0),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 1000,
+            },
+            {
+                "TradeID": 2,
+                "EntryTime": datetime(2026, 5, 20, 10, 15),
+                "ExitTime": datetime(2026, 5, 20, 10, 30),
+                "Symbol": "NQ",
+                "Direction": "Long",
+                "Quantity": 1,
+                "NetPnL": 100,
+            },
+        ]
+    )
+    base_config = _transition_wait_config()
+    explicit_zero_config = _transition_wait_config()
+    explicit_zero_config["simulation"]["pass_transition_wait_minutes"] = 0
+    explicit_zero_config["simulation"]["fail_transition_wait_minutes"] = 0
+
+    base_results = simulate_funding(trades, base_config)
+    zero_results = simulate_funding(trades, explicit_zero_config)
+
+    assert base_results["trade_log"] == zero_results["trade_log"]
+    assert [account.trades_count for account in base_results["accounts"]] == [
+        account.trades_count for account in zero_results["accounts"]
+    ]
+
+
+def test_pass_transition_wait_skips_funded_trades_inside_window():
+    trades = pd.DataFrame(
+        [
+                _timed_trade_row(1, "2026-05-20 09:30", "2026-05-20 10:00", 1000),
+                _timed_trade_row(2, "2026-05-20 10:30", "2026-05-20 10:45", 100),
+                _timed_trade_row(3, "2026-05-20 11:00", "2026-05-20 11:15", 100),
+        ]
+    )
+    config = _transition_wait_config()
+    config["simulation"]["pass_transition_wait_minutes"] = 60
+
+    results = simulate_funding(trades, config)
+    funded = [account for account in results["accounts"] if account.phase == "FUNDED"][0]
+    funded_logs = [row for row in results["trade_log"] if row["Phase"] == "FUNDED"]
+
+    assert funded.earliest_trade_time == pd.Timestamp("2026-05-20 11:00")
+    assert funded.trades_count == 1
+    assert funded_logs[0]["TradeID"] == 3
+
+
+def test_fail_transition_wait_skips_recycled_eval_trades_inside_window():
+    trades = pd.DataFrame(
+        [
+                _timed_trade_row(1, "2026-05-20 09:30", "2026-05-20 10:00", -1000),
+                _timed_trade_row(2, "2026-05-20 10:15", "2026-05-20 10:20", 100),
+                _timed_trade_row(3, "2026-05-20 10:30", "2026-05-20 10:35", 100),
+        ]
+    )
+    config = _transition_wait_config()
+    config["evaluation"]["profit_target"] = 9999
+    config["evaluation"]["max_drawdown"] = 1000
+    config["simulation"]["fail_transition_wait_minutes"] = 30
+
+    results = simulate_funding(trades, config)
+    recycled_eval = [account for account in results["accounts"] if account.account_id == 2][0]
+    recycled_logs = [
+        row for row in results["trade_log"]
+        if row["AccountID"] == 2 and row["Phase"] == "EVALUATION"
+    ]
+
+    assert recycled_eval.earliest_trade_time == pd.Timestamp("2026-05-20 10:30")
+    assert recycled_eval.trades_count == 1
+    assert recycled_logs[0]["TradeID"] == 3
+
+
+def test_wait_window_prevents_failure_from_skipped_trade():
+    trades = pd.DataFrame(
+        [
+                _timed_trade_row(1, "2026-05-20 09:30", "2026-05-20 10:00", -1000),
+                _timed_trade_row(2, "2026-05-20 10:15", "2026-05-20 10:20", -2000),
+        ]
+    )
+    config = _transition_wait_config()
+    config["evaluation"]["profit_target"] = 9999
+    config["evaluation"]["max_drawdown"] = 1000
+    config["simulation"]["fail_transition_wait_minutes"] = 60
+
+    results = simulate_funding(trades, config)
+    recycled_eval = [account for account in results["accounts"] if account.account_id == 2][0]
+
+    assert recycled_eval.status == "ACTIVE"
+    assert recycled_eval.trades_count == 0
+    assert recycled_eval.pnl == 0
+
+
+def test_transition_wait_boundary_trade_is_applied():
+    trades = pd.DataFrame(
+        [
+                _timed_trade_row(1, "2026-05-20 09:30", "2026-05-20 10:00", -1000),
+                _timed_trade_row(2, "2026-05-20 10:30", "2026-05-20 10:35", 100),
+        ]
+    )
+    config = _transition_wait_config()
+    config["evaluation"]["profit_target"] = 9999
+    config["evaluation"]["max_drawdown"] = 1000
+    config["simulation"]["fail_transition_wait_minutes"] = 30
+
+    results = simulate_funding(trades, config)
+    recycled_eval = [account for account in results["accounts"] if account.account_id == 2][0]
+
+    assert recycled_eval.earliest_trade_time == pd.Timestamp("2026-05-20 10:30")
+    assert recycled_eval.trades_count == 1
+    assert recycled_eval.pnl == 100
 
 
 def test_simulate_funding_can_start_directly_with_funded_account():

@@ -185,6 +185,24 @@ def sidebar_controls() -> dict[str, Any]:
             key="max_holding_minutes",
         )
 
+        st.header("Simulation Settings")
+        pass_transition_wait_minutes = st.number_input(
+            "Wait after PASS (min)",
+            min_value=0,
+            value=0,
+            step=15,
+            key="pass_transition_wait_minutes",
+            help="Trades within this window after account transition are skipped.",
+        )
+        fail_transition_wait_minutes = st.number_input(
+            "Wait after FAIL (min)",
+            min_value=0,
+            value=0,
+            step=15,
+            key="fail_transition_wait_minutes",
+            help="Trades within this window after account transition are skipped.",
+        )
+
         st.header("Costs")
         commission_per_side = st.number_input(
             "Commission per side",
@@ -246,6 +264,8 @@ def sidebar_controls() -> dict[str, Any]:
         "stop_loss_points": stop_loss_points,
         "take_profit_points": take_profit_points,
         "max_holding_minutes": int(max_holding_minutes),
+        "pass_transition_wait_minutes": int(pass_transition_wait_minutes),
+        "fail_transition_wait_minutes": int(fail_transition_wait_minutes),
         "commission_per_side": commission_per_side,
         "slippage_points": slippage_points,
         "spread_points": spread_points,
@@ -337,6 +357,7 @@ def run_analysis(controls: dict[str, Any]) -> None:
 
     strategy_metrics = calculate_strategy_metrics(trades)
     config = config_from_preset(preset)
+    apply_app_simulation_settings(config, controls)
     results = simulate_funding(trades, config)
     business_metrics = calculate_business_metrics(results, config)
     bankroll_result = None
@@ -372,6 +393,8 @@ def run_analysis(controls: dict[str, Any]) -> None:
             bankroll=controls.get("bankroll"),
             monte_carlo_runs=controls.get("monte_carlo_runs", 0),
             monte_carlo_max_accounts=controls.get("monte_carlo_max_accounts", 100),
+            pass_transition_wait_minutes=controls.get("pass_transition_wait_minutes", 0),
+            fail_transition_wait_minutes=controls.get("fail_transition_wait_minutes", 0),
         )
         if not comparison_rows:
             st.warning("No runnable presets were available for comparison.")
@@ -449,6 +472,12 @@ def build_strategy(controls: dict[str, Any]):
         start_time=controls["strategy_start_time"],
         end_time=controls["strategy_end_time"],
     )
+
+
+def apply_app_simulation_settings(config: dict[str, Any], controls: dict[str, Any]) -> None:
+    simulation = config.setdefault("simulation", {})
+    simulation["pass_transition_wait_minutes"] = controls.get("pass_transition_wait_minutes", 0)
+    simulation["fail_transition_wait_minutes"] = controls.get("fail_transition_wait_minutes", 0)
 
 
 def render_setup_loader() -> None:
@@ -560,6 +589,8 @@ def apply_setup_to_session_state(setup: dict[str, Any]) -> None:
         "stop_loss_points": setup.get("stop_loss_points"),
         "take_profit_points": setup.get("take_profit_points"),
         "max_holding_minutes": setup.get("max_holding_minutes"),
+        "pass_transition_wait_minutes": setup.get("pass_transition_wait_minutes"),
+        "fail_transition_wait_minutes": setup.get("fail_transition_wait_minutes"),
         "commission_per_side": setup.get("commission_per_side"),
         "slippage_points": setup.get("slippage_points"),
         "spread_points": setup.get("spread_points"),
@@ -763,6 +794,8 @@ def run_app_preset_comparison(
     bankroll: float | None,
     monte_carlo_runs: int,
     monte_carlo_max_accounts: int,
+    pass_transition_wait_minutes: int = 0,
+    fail_transition_wait_minutes: int = 0,
 ) -> list[dict[str, Any]]:
     rows = []
     for preset_id in preset_ids:
@@ -775,6 +808,13 @@ def run_app_preset_comparison(
             continue
 
         config = config_from_preset(preset)
+        apply_app_simulation_settings(
+            config,
+            {
+                "pass_transition_wait_minutes": pass_transition_wait_minutes,
+                "fail_transition_wait_minutes": fail_transition_wait_minutes,
+            },
+        )
         results = simulate_funding(trades, config)
         metrics = calculate_business_metrics(results, config)
         bankroll_result = None
@@ -1072,6 +1112,7 @@ def account_cycle_registry_row(
         "Status": account.status,
         "ResultReason": account.result_reason,
         "StartedAt": account.started_at,
+        "EarliestTradeTime": getattr(account, "earliest_trade_time", None),
         "EndedAt": account.ended_at,
         "CalendarDays": calendar_days_between(account.started_at, account.ended_at),
         "TradingDays": len(getattr(account, "trading_days", set())),
@@ -1426,6 +1467,10 @@ def store_analysis_results(
             "bankroll": controls.get("bankroll"),
             "monte_carlo_runs": controls.get("monte_carlo_runs"),
             "monte_carlo_max_accounts": controls.get("monte_carlo_max_accounts"),
+            "simulation_settings": {
+                "pass_transition_wait_minutes": controls.get("pass_transition_wait_minutes"),
+                "fail_transition_wait_minutes": controls.get("fail_transition_wait_minutes"),
+            },
             "comparison_enabled": controls.get("comparison_enabled"),
             "comparison_preset_ids": controls.get("comparison_preset_ids", []),
         },
@@ -2132,7 +2177,7 @@ def format_account_summary_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
             formatted[column] = formatted[column].apply(
                 lambda value: "N/A" if pd.isna(value) else format_currency_full(value)
             )
-    for column in ["StartedAt", "EndedAt"]:
+    for column in ["StartedAt", "EarliestTradeTime", "EndedAt"]:
         if column in formatted.columns:
             formatted[column] = formatted[column].apply(_optional_datetime)
     if "DrawdownLocked" in formatted.columns:
@@ -3720,6 +3765,10 @@ def build_run_manifest(
             "monte_carlo_runs": controls.get("monte_carlo_runs"),
             "monte_carlo_max_accounts": controls.get("monte_carlo_max_accounts"),
         },
+        "simulation_settings": {
+            "pass_transition_wait_minutes": controls.get("pass_transition_wait_minutes"),
+            "fail_transition_wait_minutes": controls.get("fail_transition_wait_minutes"),
+        },
         "comparison": {
             "enabled": controls.get("comparison_enabled"),
             "preset_ids": controls.get("comparison_preset_ids", []),
@@ -4691,6 +4740,7 @@ def _configuration_rows(analysis_state: dict[str, Any]) -> list[dict[str, Any]]:
     rows.extend(_dict_rows("Risk", analysis_state.get("risk_settings", {})))
     rows.extend(_dict_rows("Costs", input_config.get("cost_settings", {})))
     rows.extend(_dict_rows("Time", input_config.get("time_filters", {})))
+    rows.extend(_dict_rows("Simulation", input_config.get("simulation_settings", {})))
     rows.extend(
         [
             {"Setting": "Bankroll", "Value": input_config.get("bankroll")},

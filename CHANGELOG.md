@@ -20,6 +20,7 @@ under `Unreleased` until a stable tag is created.
 - Streamlit account rule audit table with account-aware exits and payout blockers.
 - Streamlit preset comparison detail view with size filters and best/worst rankings.
 - Streamlit Account Cycle Registry for full-run account/cycle logging.
+- Configurable account transition wait times after PASS and FAIL events.
 
 ### Notes
 

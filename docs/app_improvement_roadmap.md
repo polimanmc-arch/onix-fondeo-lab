@@ -302,7 +302,7 @@ Acceptance criteria:
 
 ### 19. Account Transition Wait Time
 
-Status: Next
+Status: Done
 
 Add a configurable wait time between account transitions. For example, if an
 evaluation passes, wait 60 minutes before the funded account can start taking
@@ -317,7 +317,7 @@ Acceptance criteria:
 
 ### 20. Phase Risk Management Presets
 
-Status: Planned
+Status: Next
 
 Allow different execution/risk profiles based on the stage of an account.
 Examples:

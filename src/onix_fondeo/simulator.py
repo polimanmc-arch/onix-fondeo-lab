@@ -33,6 +33,8 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
     funded_rules = config["funded"]
     simulation_settings = config["simulation"]
     metadata = config.get("metadata", {})
+    pass_wait_minutes = simulation_settings.get("pass_transition_wait_minutes", 0) or 0
+    fail_wait_minutes = simulation_settings.get("fail_transition_wait_minutes", 0) or 0
 
     accounts: list[Account] = []
     trade_log: list[dict[str, Any]] = []
@@ -89,6 +91,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
             active_eval is not None
             and active_eval.status == "ACTIVE"
             and _trade_matches_account_phase(phase_profile, active_eval.phase)
+            and not _account_in_transition_wait(active_eval, trade)
         ):
             adjusted_trade, account_exit_reason = _account_adjusted_trade(
                 active_eval,
@@ -128,6 +131,10 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     account_id=active_eval.account_id,
                     phase="FUNDED",
                     started_at=trade.exit_time,
+                    earliest_trade_time=_transition_ready_time(
+                        trade.exit_time,
+                        pass_wait_minutes,
+                    ),
                 )
                 accounts.append(funded_account)
                 active_funded_accounts.append(funded_account)
@@ -136,6 +143,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     should_open=simulation_settings.get("continue_after_pass", False),
                     next_account_id=next_account_id,
                     opened_at=trade.exit_time,
+                    wait_minutes=fail_wait_minutes,
                     evaluation_cost=evaluation_rules.get("evaluation_cost"),
                     max_accounts=simulation_settings.get("max_accounts"),
                     accounts=accounts,
@@ -149,6 +157,7 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
                     should_open=simulation_settings.get("recycle_failed_accounts", False),
                     next_account_id=next_account_id,
                     opened_at=trade.exit_time,
+                    wait_minutes=fail_wait_minutes,
                     evaluation_cost=evaluation_rules.get("evaluation_cost"),
                     max_accounts=simulation_settings.get("max_accounts"),
                     accounts=accounts,
@@ -161,6 +170,8 @@ def simulate_funding(trades_df: Any, config: dict[str, Any]) -> dict[str, Any]:
             if funded_account.status != "ACTIVE":
                 continue
             if not _trade_matches_account_phase(phase_profile, funded_account.phase):
+                continue
+            if _account_in_transition_wait(funded_account, trade):
                 continue
 
             adjusted_trade, account_exit_reason = _account_adjusted_trade(
@@ -238,6 +249,15 @@ def _trade_matches_account_phase(
     if phase_profile is None:
         return True
     return phase_profile == account_phase
+
+
+def _account_in_transition_wait(account: Account, trade: Trade) -> bool:
+    if account.earliest_trade_time is None:
+        return False
+    trade_ref_time = trade.entry_time or trade.exit_time
+    if trade_ref_time is None:
+        return False
+    return pd.Timestamp(trade_ref_time) < pd.Timestamp(account.earliest_trade_time)
 
 
 def _account_adjusted_trade(
@@ -325,8 +345,14 @@ def _open_evaluation_account(
     evaluation_cost: Optional[float],
     accounts: list[Account],
     business_events: list[dict[str, Any]],
+    wait_minutes: int | float = 0,
 ) -> Account:
-    account = Account(account_id=account_id, phase="EVALUATION", started_at=opened_at)
+    account = Account(
+        account_id=account_id,
+        phase="EVALUATION",
+        started_at=opened_at,
+        earliest_trade_time=_transition_ready_time(opened_at, wait_minutes),
+    )
     accounts.append(account)
     _register_account_cost(
         account_id=account_id,
@@ -360,6 +386,7 @@ def _maybe_open_next_evaluation(
     should_open: bool,
     next_account_id: int,
     opened_at: Any,
+    wait_minutes: int | float,
     evaluation_cost: Optional[float],
     max_accounts: Optional[int],
     accounts: list[Account],
@@ -376,7 +403,14 @@ def _maybe_open_next_evaluation(
         evaluation_cost=evaluation_cost,
         accounts=accounts,
         business_events=business_events,
+        wait_minutes=wait_minutes,
     )
+
+
+def _transition_ready_time(opened_at: Any, wait_minutes: int | float) -> Any:
+    if opened_at is None or not wait_minutes:
+        return None
+    return pd.Timestamp(opened_at) + pd.Timedelta(minutes=wait_minutes)
 
 
 def _trade_log_row(

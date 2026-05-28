@@ -38,6 +38,7 @@ class Account:
     daily_pnl: dict[date, float] = field(default_factory=dict)
     trades_count: int = 0
     started_at: Optional[Any] = None
+    earliest_trade_time: Optional[Any] = None
     ended_at: Optional[Any] = None
     result_reason: Optional[str] = None
     payouts: list[Payout] = field(default_factory=list)
