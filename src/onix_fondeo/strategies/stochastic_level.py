@@ -29,8 +29,8 @@ class StochasticLevelStrategy(BaseStrategy):
         k_period: int | None = None,
         d_period: int | None = None,
     ) -> None:
-        if signal_mode not in {"cross", "zone"}:
-            raise ValueError("signal_mode must be 'cross' or 'zone'.")
+        if signal_mode not in {"cross", "zone", "d_cross"}:
+            raise ValueError("signal_mode must be 'cross', 'zone', or 'd_cross'.")
 
         if k_period is not None:
             period_k = k_period
@@ -67,6 +67,7 @@ class StochasticLevelStrategy(BaseStrategy):
         for index in range(1, len(data)):
             row = data.iloc[index]
             previous_k = data.iloc[index - 1]["PercentK"]
+            previous_d = data.iloc[index - 1]["PercentD"]
             current_k = row["PercentK"]
             current_d = row["PercentD"]
 
@@ -82,6 +83,7 @@ class StochasticLevelStrategy(BaseStrategy):
                 signal_time=row["DateTime"],
                 previous_k=previous_k,
                 current_k=current_k,
+                previous_d=previous_d,
                 current_d=current_d,
             )
             if signal is not None:
@@ -125,8 +127,34 @@ class StochasticLevelStrategy(BaseStrategy):
         signal_time: object,
         previous_k: float,
         current_k: float,
+        previous_d: float,
         current_d: float,
     ) -> StrategySignal | None:
+        if self.signal_mode == "d_cross":
+            if self._is_long_signal_d(previous_d, current_d) and self._has_d_confirmation(
+                direction="Long",
+                current_k=current_k,
+                current_d=current_d,
+            ):
+                return StrategySignal(
+                    signal_time=signal_time,
+                    direction="Long",
+                    reason="stoch_d_cross_long",
+                )
+
+            if self._is_short_signal_d(previous_d, current_d) and self._has_d_confirmation(
+                direction="Short",
+                current_k=current_k,
+                current_d=current_d,
+            ):
+                return StrategySignal(
+                    signal_time=signal_time,
+                    direction="Short",
+                    reason="stoch_d_cross_short",
+                )
+
+            return None
+
         if self._is_long_signal(previous_k, current_k) and self._has_d_confirmation(
             direction="Long",
             current_k=current_k,
@@ -164,6 +192,20 @@ class StochasticLevelStrategy(BaseStrategy):
         if self.signal_mode == "cross":
             return previous_k >= self.overbought_level and current_k < self.overbought_level
         return current_k >= self.overbought_level
+
+    def _is_long_signal_d(self, previous_d: float, current_d: float) -> bool:
+        if not self.allow_long:
+            return False
+        if pd.isna(previous_d) or pd.isna(current_d):
+            return False
+        return previous_d <= self.oversold_level and current_d > self.oversold_level
+
+    def _is_short_signal_d(self, previous_d: float, current_d: float) -> bool:
+        if not self.allow_short:
+            return False
+        if pd.isna(previous_d) or pd.isna(current_d):
+            return False
+        return previous_d >= self.overbought_level and current_d < self.overbought_level
 
     def _has_d_confirmation(
         self,

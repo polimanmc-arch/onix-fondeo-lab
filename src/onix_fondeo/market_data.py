@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Optional
 
 import pandas as pd
@@ -55,8 +56,21 @@ def load_ohlc_data(
     ohlc = ohlc.sort_values("DateTime").reset_index(drop=True)
     if timezone is not None:
         ohlc.attrs["timezone"] = timezone
+        try:
+            offset_hours = _parse_utc_offset(timezone)
+            ohlc["DateTime"] = ohlc["DateTime"] + pd.Timedelta(hours=offset_hours)
+        except ValueError:
+            pass
 
     return ohlc
+
+
+def _parse_utc_offset(tz_str: str) -> float:
+    """Parse UTC offsets such as UTC-5, UTC+0, or UTC-4.5 into hours."""
+    match = re.match(r"UTC([+-]\d+(?:\.\d+)?)", tz_str.strip().upper())
+    if not match:
+        raise ValueError(f"Unrecognized UTC offset format: {tz_str!r}")
+    return float(match.group(1))
 
 
 def load_ninjatrader_export(input_path: str, symbol: str) -> pd.DataFrame:

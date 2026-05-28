@@ -171,6 +171,29 @@ def test_load_ohlc_data_stores_timezone_attr(tmp_path: Path):
     assert ohlc.iloc[0]["Symbol"] == "NQ"
 
 
+def test_load_ohlc_data_shifts_datetime_for_utc_offset(tmp_path: Path):
+    file_path = tmp_path / "ohlc.csv"
+    pd.DataFrame(
+        [
+            {
+                "DateTime": "2026-05-20 14:00:00",
+                "Open": 100,
+                "High": 101,
+                "Low": 99,
+                "Close": 100,
+            },
+        ]
+    ).to_csv(file_path, index=False)
+
+    utc_minus_five = load_ohlc_data(str(file_path), timezone="UTC-5")
+    utc_minus_four = load_ohlc_data(str(file_path), timezone="UTC-4")
+    unshifted = load_ohlc_data(str(file_path), timezone=None)
+
+    assert utc_minus_five.iloc[0]["DateTime"] == pd.Timestamp("2026-05-20 09:00:00")
+    assert utc_minus_four.iloc[0]["DateTime"] == pd.Timestamp("2026-05-20 10:00:00")
+    assert unshifted.iloc[0]["DateTime"] == pd.Timestamp("2026-05-20 14:00:00")
+
+
 def test_load_ohlc_data_keeps_rows_from_different_times_of_day(tmp_path: Path):
     file_path = tmp_path / "full_session.csv"
     pd.DataFrame(

@@ -109,6 +109,45 @@ def test_stochastic_zone_mode_repeats_signals_but_respects_cooldown():
     assert len(cooled_signals) == 2
 
 
+def test_stochastic_d_cross_mode_uses_d_line_exit_from_oversold():
+    ohlc = _stoch_ohlc([10, 30, 30])
+    strategy = StochasticLevelStrategy(
+        k_period=1,
+        d_period=2,
+        smooth=1,
+        oversold_level=20,
+        overbought_level=80,
+        allow_long=True,
+        allow_short=False,
+        signal_mode="d_cross",
+    )
+
+    signals = strategy.generate_signals(ohlc)
+
+    assert len(signals) == 1
+    assert signals[0].direction == "Long"
+    assert signals[0].reason == "stoch_d_cross_long"
+    assert signals[0].signal_time == pd.Timestamp("2026-05-20 09:32:00")
+
+
+def test_stochastic_d_cross_mode_ignores_k_cross_without_d_cross():
+    ohlc = _stoch_ohlc([10, 30])
+    strategy = StochasticLevelStrategy(
+        k_period=1,
+        d_period=2,
+        smooth=1,
+        oversold_level=20,
+        overbought_level=80,
+        allow_long=True,
+        allow_short=False,
+        signal_mode="d_cross",
+    )
+
+    signals = strategy.generate_signals(ohlc)
+
+    assert signals == []
+
+
 def test_stochastic_d_confirmation_blocks_signal_when_relationship_fails():
     ohlc = _stoch_ohlc([50, 10])
     strategy = StochasticLevelStrategy(

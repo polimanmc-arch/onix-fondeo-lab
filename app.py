@@ -85,8 +85,17 @@ def sidebar_controls() -> dict[str, Any]:
             value=20.0,
             key="point_value",
         )
+        data_utc_offset = st.text_input(
+            "Data UTC offset",
+            value="UTC-5",
+            help=(
+                "Timezone of your OHLC file. Enter as UTC-5, UTC-4, UTC+0, etc. "
+                "The data will be shifted so session filters work in local time."
+            ),
+            key="data_utc_offset",
+        )
         market_data_path = market_data_file_selector()
-        render_market_data_validator(market_data_path, symbol)
+        render_market_data_validator(market_data_path, symbol, data_utc_offset)
 
         st.header("Funding Preset")
         presets = list_presets()
@@ -141,7 +150,7 @@ def sidebar_controls() -> dict[str, Any]:
         pass_transition_wait_minutes = st.number_input(
             "Wait after PASS (min)",
             min_value=0,
-            value=0,
+            value=60,
             step=15,
             key="pass_transition_wait_minutes",
             help="Trades within this window after account transition are skipped.",
@@ -149,7 +158,7 @@ def sidebar_controls() -> dict[str, Any]:
         fail_transition_wait_minutes = st.number_input(
             "Wait after FAIL (min)",
             min_value=0,
-            value=0,
+            value=30,
             step=15,
             key="fail_transition_wait_minutes",
             help="Trades within this window after account transition are skipped.",
@@ -184,6 +193,7 @@ def sidebar_controls() -> dict[str, Any]:
         "market_data_path": market_data_path,
         "symbol": symbol,
         "point_value": point_value,
+        "data_utc_offset": data_utc_offset,
         "preset_id": selected_preset_id,
         "comparison_enabled": comparison_enabled,
         "comparison_preset_ids": comparison_preset_ids,
@@ -218,8 +228,8 @@ def _strategy_controls(strategy_name: str) -> dict[str, Any]:
         "overbought": st.number_input("Overbought", min_value=0.0, value=80.0, key="stoch_overbought"),
         "signal_mode": st.selectbox(
             "Signal mode",
-            options=["cross", "zone"],
-            index=0,
+            options=["cross", "zone", "d_cross"],
+            index=2,
             key="stoch_signal_mode",
         ),
         "use_d_confirmation": st.checkbox(
@@ -335,7 +345,7 @@ def _read_strategy_params_from_state() -> dict[str, Any]:
         "smooth": st.session_state.get("stoch_smooth", 3),
         "oversold": st.session_state.get("stoch_oversold", 20.0),
         "overbought": st.session_state.get("stoch_overbought", 80.0),
-        "signal_mode": st.session_state.get("stoch_signal_mode", "cross"),
+        "signal_mode": st.session_state.get("stoch_signal_mode", "d_cross"),
         "use_d_confirmation": st.session_state.get("stoch_use_d_confirmation", False),
         "min_k_d_gap": st.session_state.get("stoch_min_k_d_gap", 0.0),
         "cooldown_bars": st.session_state.get("stoch_cooldown_bars", 0),
@@ -355,12 +365,11 @@ def run_analysis(controls: dict[str, Any]) -> None:
         st.write(missing_fields)
         return
 
-    st.info(
-        f"Selected preset: {preset['company']} | "
-        f"{preset.get('plan')} | {preset.get('account_name')}"
+    ohlc = load_ohlc_data(
+        controls["market_data_path"],
+        symbol=controls["symbol"],
+        timezone=controls.get("data_utc_offset"),
     )
-
-    ohlc = load_ohlc_data(controls["market_data_path"], symbol=controls["symbol"])
     market_data_summary = build_market_data_summary(ohlc, controls["market_data_path"])
     strategy = build_strategy(controls)
     trades = backtest_strategy(
@@ -553,6 +562,7 @@ def current_controls_snapshot(local_values: dict[str, Any]) -> dict[str, Any]:
         "market_data_path": local_values.get("market_data_path"),
         "symbol": local_values.get("symbol"),
         "point_value": local_values.get("point_value"),
+        "data_utc_offset": local_values.get("data_utc_offset"),
         "preset_id": local_values.get("selected_preset_id"),
         "comparison_enabled": local_values.get("comparison_enabled"),
         "comparison_preset_ids": local_values.get("comparison_preset_ids", []),
@@ -612,6 +622,7 @@ def apply_setup_to_session_state(setup: dict[str, Any]) -> None:
     direct_widget_values = {
         "market_symbol": setup.get("symbol"),
         "point_value": setup.get("point_value"),
+        "data_utc_offset": setup.get("data_utc_offset"),
         "comparison_enabled": setup.get("comparison_enabled"),
         "strategy_name": setup.get("strategy_name"),
         "strategy_start_time": setup.get("strategy_start_time") or "",
@@ -726,13 +737,14 @@ def market_data_option_label(option: str) -> str:
         return str(option)
 
 
-def render_market_data_validator(file_path: str, symbol: str) -> None:
+def render_market_data_validator(file_path: str, symbol: str, timezone: str | None = None) -> None:
     with st.expander("Validate market data", expanded=False):
         st.caption("Checks format, numeric prices and OHLC integrity before running.")
         if st.button("Validate OHLC file"):
             st.session_state["market_data_validation"] = validate_market_data_file(
                 file_path,
                 symbol,
+                timezone,
             )
         validation = st.session_state.get("market_data_validation")
         if not validation:
@@ -748,9 +760,13 @@ def render_market_data_validator(file_path: str, symbol: str) -> None:
             st.error(validation["error"])
 
 
-def validate_market_data_file(file_path: str, symbol: str | None = None) -> dict[str, Any]:
+def validate_market_data_file(
+    file_path: str,
+    symbol: str | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
     try:
-        ohlc = load_ohlc_data(file_path, symbol=symbol)
+        ohlc = load_ohlc_data(file_path, symbol=symbol, timezone=timezone)
     except Exception as error:
         return {"ok": False, "error": str(error), "summary": None}
     return {
@@ -1181,6 +1197,7 @@ def account_cycle_registry_row(
         "MarketDataPath": controls.get("market_data_path"),
         "Symbol": controls.get("symbol"),
         "PointValue": controls.get("point_value"),
+        "DataUTCOffset": controls.get("data_utc_offset"),
     }
     row.update(rule_counts)
     row.update(session_stats)
@@ -1486,6 +1503,7 @@ def store_analysis_results(
             "market_data_path": controls.get("market_data_path"),
             "symbol": controls.get("symbol"),
             "point_value": controls.get("point_value"),
+            "data_utc_offset": controls.get("data_utc_offset"),
             "time_filters": {
                 "strategy_start_time": controls.get("strategy_start_time"),
                 "strategy_end_time": controls.get("strategy_end_time"),
@@ -1541,19 +1559,60 @@ def render_outputs_from_state(analysis_state: dict[str, Any]) -> None:
 
 
 def render_empty_app_tabs() -> None:
-    dashboard_tab, strategy_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
-        ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
-    )
-    with dashboard_tab:
+    active_tab = render_results_tab_selector()
+    if active_tab == "Dashboard":
         st.info("Configure the sidebar and Strategy tab, then click Run Analysis.")
-    with strategy_tab:
+    elif active_tab == "Strategy":
         render_strategy_tab()
-    with backtest_tab:
+    elif active_tab == "Backtest":
         st.info("Run an analysis to explore trades and charts.")
-    with funding_risk_tab:
+    elif active_tab == "Funding & Risk":
         st.info("Run an analysis to review funding, bankroll, and risk results.")
-    with data_tab:
+    elif active_tab == "Data":
         st.info("Run an analysis to inspect configuration, outputs, and data previews.")
+
+
+def render_results_tab_selector() -> str:
+    inject_persistent_tab_css()
+    tab_options = ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
+    _ensure_widget_choice("active_results_tab", tab_options, "Dashboard")
+    active_tab = st.radio(
+        "Results tabs",
+        options=tab_options,
+        horizontal=True,
+        key="active_results_tab",
+        label_visibility="collapsed",
+    )
+    st.divider()
+    return active_tab
+
+
+def inject_persistent_tab_css() -> None:
+    st.markdown(
+        """
+        <style>
+        div[role="radiogroup"] {
+            gap: 0;
+        }
+        div[role="radiogroup"] > label {
+            padding: 8px 20px;
+            border: 1px solid #ddd;
+            border-bottom: none;
+            border-radius: 6px 6px 0 0;
+            margin-right: 4px;
+            background: #f7f7f7;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        div[role="radiogroup"] > label:has(input:checked) {
+            background: white;
+            border-bottom: 2px solid white;
+            color: #0f52ba;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def render_outputs(
@@ -1568,20 +1627,17 @@ def render_outputs(
     exported_files: dict[str, Path],
     analysis_state: dict[str, Any] | None = None,
 ) -> None:
-    dashboard_tab, strategy_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
-        ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
-    )
-
     state = analysis_state or {}
-    with dashboard_tab:
+    active_tab = render_results_tab_selector()
+    if active_tab == "Dashboard":
         render_dashboard_tab(state)
-    with strategy_tab:
+    elif active_tab == "Strategy":
         render_strategy_tab()
-    with backtest_tab:
+    elif active_tab == "Backtest":
         render_backtest_tab(state)
-    with funding_risk_tab:
+    elif active_tab == "Funding & Risk":
         render_funding_risk_tab(state)
-    with data_tab:
+    elif active_tab == "Data":
         render_data_tab(state)
 
 
@@ -2762,7 +2818,7 @@ def render_diagnostics_tab(
         with st.expander("Session Diagnostics", expanded=False):
             st.caption(
                 "Sessions are diagnostic buckets based on trade ExitTime. "
-                "No timezone conversion is applied."
+                "If a UTC offset is configured, diagnostics use the shifted local timestamps."
             )
             st.dataframe(
                 _format_diagnostic_money_columns(
@@ -3766,6 +3822,7 @@ def build_run_manifest(
         "market_data_path": controls.get("market_data_path"),
         "symbol": controls.get("symbol"),
         "point_value": controls.get("point_value"),
+        "data_utc_offset": controls.get("data_utc_offset"),
         "time_filters": {
             "strategy_start_time": controls.get("strategy_start_time"),
             "strategy_end_time": controls.get("strategy_end_time"),
@@ -4463,20 +4520,6 @@ def select_funding_preset(presets: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def render_selected_preset_info(preset: dict[str, Any]) -> None:
-    st.info(
-        "\n".join(
-            [
-                f"preset_id: {preset.get('preset_id')}",
-                f"company: {preset.get('company')}",
-                f"plan: {preset.get('plan')}",
-                f"account_name: {preset.get('account_name')}",
-                f"account_size: {format_account_size(preset.get('account_size'))}",
-                f"Runnable: {'Yes' if preset.get('is_runnable') else 'No'}",
-                f"Verified: {'Yes' if preset.get('rules_verified') else 'No'}",
-            ]
-        )
-    )
-
     missing_fields = preset.get("missing_fields", [])
     if missing_fields:
         shown_fields = ", ".join(missing_fields[:8])
@@ -4780,6 +4823,7 @@ def _configuration_rows(analysis_state: dict[str, Any]) -> list[dict[str, Any]]:
     rows = [
         {"Setting": "Run folder", "Value": analysis_state.get("exported_files", {}).get("run_folder")},
         {"Setting": "Market data path", "Value": input_config.get("market_data_path")},
+        {"Setting": "Data UTC offset", "Value": input_config.get("data_utc_offset")},
         {"Setting": "Preset ID", "Value": preset.get("preset_id")},
         {"Setting": "Company", "Value": preset.get("company")},
         {"Setting": "Plan", "Value": preset.get("plan")},
