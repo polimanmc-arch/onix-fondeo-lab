@@ -59,7 +59,7 @@ def main() -> None:
 
     controls = sidebar_controls()
 
-    if controls["run_analysis"]:
+    if controls["run_analysis"] or st.session_state.pop("run_requested", False):
         try:
             run_analysis(controls)
         except Exception as error:
@@ -67,7 +67,7 @@ def main() -> None:
 
     analysis_state = get_analysis_state()
     if analysis_state is None:
-        st.info("Configure the sidebar and click Run Analysis.")
+        render_empty_app_tabs()
         return
 
     render_outputs_from_state(analysis_state)
@@ -137,54 +137,6 @@ def sidebar_controls() -> dict[str, Any]:
             if len(comparison_preset_ids) < 2:
                 st.caption("Select at least two presets for a meaningful comparison.")
 
-        st.header("Strategy")
-        strategy_name = st.selectbox(
-            "Strategy",
-            options=["random", "stochastic"],
-            index=1,
-            key="strategy_name",
-        )
-        strategy_params = _strategy_controls(strategy_name)
-
-        st.header("Time Filters")
-        strategy_start_time = st.text_input(
-            "Strategy start time",
-            value="09:45",
-            key="strategy_start_time",
-        )
-        strategy_end_time = st.text_input(
-            "Strategy end time",
-            value="16:00",
-            key="strategy_end_time",
-        )
-        force_close_time = st.text_input(
-            "Force close time",
-            value="16:00",
-            key="force_close_time",
-        )
-
-        st.header("Risk Settings")
-        contracts = st.number_input("Contracts", min_value=0.0, value=1.0, key="contracts")
-        stop_loss_points = st.number_input(
-            "Stop loss points",
-            min_value=0.0,
-            value=70.0,
-            key="stop_loss_points",
-        )
-        take_profit_points = st.number_input(
-            "Take profit points",
-            min_value=0.0,
-            value=50.0,
-            key="take_profit_points",
-        )
-        max_holding_minutes = st.number_input(
-            "Max holding minutes",
-            min_value=1,
-            value=60,
-            step=1,
-            key="max_holding_minutes",
-        )
-
         st.header("Simulation Settings")
         pass_transition_wait_minutes = st.number_input(
             "Wait after PASS (min)",
@@ -201,26 +153,6 @@ def sidebar_controls() -> dict[str, Any]:
             step=15,
             key="fail_transition_wait_minutes",
             help="Trades within this window after account transition are skipped.",
-        )
-
-        st.header("Costs")
-        commission_per_side = st.number_input(
-            "Commission per side",
-            min_value=0.0,
-            value=0.0,
-            key="commission_per_side",
-        )
-        slippage_points = st.number_input(
-            "Slippage points",
-            min_value=0.0,
-            value=0.0,
-            key="slippage_points",
-        )
-        spread_points = st.number_input(
-            "Spread points",
-            min_value=0.0,
-            value=0.0,
-            key="spread_points",
         )
 
         st.header("Bankroll / Risk")
@@ -255,20 +187,8 @@ def sidebar_controls() -> dict[str, Any]:
         "preset_id": selected_preset_id,
         "comparison_enabled": comparison_enabled,
         "comparison_preset_ids": comparison_preset_ids,
-        "strategy_name": strategy_name,
-        "strategy_params": strategy_params,
-        "strategy_start_time": _blank_to_none(strategy_start_time),
-        "strategy_end_time": _blank_to_none(strategy_end_time),
-        "force_close_time": _blank_to_none(force_close_time),
-        "contracts": contracts,
-        "stop_loss_points": stop_loss_points,
-        "take_profit_points": take_profit_points,
-        "max_holding_minutes": int(max_holding_minutes),
         "pass_transition_wait_minutes": int(pass_transition_wait_minutes),
         "fail_transition_wait_minutes": int(fail_transition_wait_minutes),
-        "commission_per_side": commission_per_side,
-        "slippage_points": slippage_points,
-        "spread_points": spread_points,
         "bankroll": bankroll if bankroll > 0 else None,
         "monte_carlo_runs": int(monte_carlo_runs),
         "monte_carlo_max_accounts": int(monte_carlo_max_accounts),
@@ -318,7 +238,112 @@ def _strategy_controls(strategy_name: str) -> dict[str, Any]:
     }
 
 
+def render_strategy_tab() -> None:
+    st.subheader("Strategy Configuration Workspace")
+    st.caption("Configure entry logic, time filters, risk per trade, and trading costs.")
+
+    entry_column, time_column = st.columns(2)
+    with entry_column:
+        st.subheader("Entry Strategy")
+        strategy_name = st.selectbox(
+            "Strategy",
+            options=["random", "stochastic"],
+            index=1,
+            key="strategy_name",
+        )
+        _strategy_controls(strategy_name)
+
+    with time_column:
+        st.subheader("Time Filters")
+        st.text_input("Strategy start time", value="09:45", key="strategy_start_time")
+        st.text_input("Strategy end time", value="16:00", key="strategy_end_time")
+        st.text_input("Force close time", value="16:00", key="force_close_time")
+
+    risk_column, cost_column = st.columns(2)
+    with risk_column:
+        st.subheader("Risk per Trade")
+        st.number_input("Contracts", min_value=0.0, value=1.0, key="contracts")
+        st.number_input("Stop loss points", min_value=0.0, value=70.0, key="stop_loss_points")
+        st.number_input("Take profit points", min_value=0.0, value=50.0, key="take_profit_points")
+        st.number_input(
+            "Max holding minutes",
+            min_value=1,
+            value=60,
+            step=1,
+            key="max_holding_minutes",
+        )
+
+    with cost_column:
+        st.subheader("Costs")
+        st.number_input("Commission per side", min_value=0.0, value=0.0, key="commission_per_side")
+        st.number_input("Slippage points", min_value=0.0, value=0.0, key="slippage_points")
+        st.number_input("Spread points", min_value=0.0, value=0.0, key="spread_points")
+
+    update_strategy_dirty_state()
+    if st.session_state.get("strategy_config_dirty", False):
+        st.warning("Configuration changed - click Apply & Run to update results.")
+    st.button(
+        "Apply & Run Analysis",
+        type="primary",
+        on_click=trigger_run,
+        use_container_width=True,
+    )
+
+
+def trigger_run() -> None:
+    st.session_state["run_requested"] = True
+
+
+def update_strategy_dirty_state() -> None:
+    current_hash = strategy_config_hash(get_strategy_controls_from_state())
+    last_run_hash = st.session_state.get("last_run_strategy_config_hash")
+    if last_run_hash is not None and current_hash != last_run_hash:
+        st.session_state["strategy_config_dirty"] = True
+
+
+def strategy_config_hash(strategy_controls: dict[str, Any]) -> str:
+    return json.dumps(strategy_controls, sort_keys=True, default=str)
+
+
+def get_strategy_controls_from_state() -> dict[str, Any]:
+    return {
+        "strategy_name": st.session_state.get("strategy_name", "stochastic"),
+        "strategy_params": _read_strategy_params_from_state(),
+        "strategy_start_time": _blank_to_none(str(st.session_state.get("strategy_start_time", "09:45"))),
+        "strategy_end_time": _blank_to_none(str(st.session_state.get("strategy_end_time", "16:00"))),
+        "force_close_time": _blank_to_none(str(st.session_state.get("force_close_time", "16:00"))),
+        "contracts": st.session_state.get("contracts", 1.0),
+        "stop_loss_points": st.session_state.get("stop_loss_points", 70.0),
+        "take_profit_points": st.session_state.get("take_profit_points", 50.0),
+        "max_holding_minutes": int(st.session_state.get("max_holding_minutes", 60)),
+        "commission_per_side": st.session_state.get("commission_per_side", 0.0),
+        "slippage_points": st.session_state.get("slippage_points", 0.0),
+        "spread_points": st.session_state.get("spread_points", 0.0),
+    }
+
+
+def _read_strategy_params_from_state() -> dict[str, Any]:
+    strategy_name = st.session_state.get("strategy_name", "stochastic")
+    if strategy_name == "random":
+        return {
+            "probability": st.session_state.get("random_probability", 0.005),
+            "seed": st.session_state.get("random_seed", 42),
+        }
+    return {
+        "period_k": st.session_state.get("stoch_period_k", 20),
+        "period_d": st.session_state.get("stoch_period_d", 5),
+        "smooth": st.session_state.get("stoch_smooth", 3),
+        "oversold": st.session_state.get("stoch_oversold", 20.0),
+        "overbought": st.session_state.get("stoch_overbought", 80.0),
+        "signal_mode": st.session_state.get("stoch_signal_mode", "cross"),
+        "use_d_confirmation": st.session_state.get("stoch_use_d_confirmation", False),
+        "min_k_d_gap": st.session_state.get("stoch_min_k_d_gap", 0.0),
+        "cooldown_bars": st.session_state.get("stoch_cooldown_bars", 0),
+    }
+
+
 def run_analysis(controls: dict[str, Any]) -> None:
+    controls = {**controls, **get_strategy_controls_from_state()}
     if controls["preset_id"] is None:
         st.error("No preset selected.")
         return
@@ -447,6 +472,10 @@ def run_analysis(controls: dict[str, Any]) -> None:
         account_rule_audit,
         account_cycle_registry,
     )
+    st.session_state["last_run_strategy_config_hash"] = strategy_config_hash(
+        get_strategy_controls_from_state()
+    )
+    st.session_state["strategy_config_dirty"] = False
 
 
 def build_strategy(controls: dict[str, Any]):
@@ -518,6 +547,7 @@ def render_setup_saver(controls_snapshot: dict[str, Any]) -> None:
 
 def current_controls_snapshot(local_values: dict[str, Any]) -> dict[str, Any]:
     bankroll = local_values.get("bankroll")
+    strategy_values = get_strategy_controls_from_state()
     return {
         "version": 1,
         "market_data_path": local_values.get("market_data_path"),
@@ -526,18 +556,20 @@ def current_controls_snapshot(local_values: dict[str, Any]) -> dict[str, Any]:
         "preset_id": local_values.get("selected_preset_id"),
         "comparison_enabled": local_values.get("comparison_enabled"),
         "comparison_preset_ids": local_values.get("comparison_preset_ids", []),
-        "strategy_name": local_values.get("strategy_name"),
-        "strategy_params": local_values.get("strategy_params", {}),
-        "strategy_start_time": _blank_to_none(local_values.get("strategy_start_time")),
-        "strategy_end_time": _blank_to_none(local_values.get("strategy_end_time")),
-        "force_close_time": _blank_to_none(local_values.get("force_close_time")),
-        "contracts": local_values.get("contracts"),
-        "stop_loss_points": local_values.get("stop_loss_points"),
-        "take_profit_points": local_values.get("take_profit_points"),
-        "max_holding_minutes": int(local_values.get("max_holding_minutes", 60)),
-        "commission_per_side": local_values.get("commission_per_side"),
-        "slippage_points": local_values.get("slippage_points"),
-        "spread_points": local_values.get("spread_points"),
+        "strategy_name": strategy_values.get("strategy_name"),
+        "strategy_params": strategy_values.get("strategy_params", {}),
+        "strategy_start_time": strategy_values.get("strategy_start_time"),
+        "strategy_end_time": strategy_values.get("strategy_end_time"),
+        "force_close_time": strategy_values.get("force_close_time"),
+        "contracts": strategy_values.get("contracts"),
+        "stop_loss_points": strategy_values.get("stop_loss_points"),
+        "take_profit_points": strategy_values.get("take_profit_points"),
+        "max_holding_minutes": int(strategy_values.get("max_holding_minutes", 60)),
+        "pass_transition_wait_minutes": int(local_values.get("pass_transition_wait_minutes", 0)),
+        "fail_transition_wait_minutes": int(local_values.get("fail_transition_wait_minutes", 0)),
+        "commission_per_side": strategy_values.get("commission_per_side"),
+        "slippage_points": strategy_values.get("slippage_points"),
+        "spread_points": strategy_values.get("spread_points"),
         "bankroll": bankroll if bankroll and bankroll > 0 else None,
         "monte_carlo_runs": int(local_values.get("monte_carlo_runs", 0)),
         "monte_carlo_max_accounts": int(local_values.get("monte_carlo_max_accounts", 100)),
@@ -1508,6 +1540,22 @@ def render_outputs_from_state(analysis_state: dict[str, Any]) -> None:
     )
 
 
+def render_empty_app_tabs() -> None:
+    dashboard_tab, strategy_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
+        ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
+    )
+    with dashboard_tab:
+        st.info("Configure the sidebar and Strategy tab, then click Run Analysis.")
+    with strategy_tab:
+        render_strategy_tab()
+    with backtest_tab:
+        st.info("Run an analysis to explore trades and charts.")
+    with funding_risk_tab:
+        st.info("Run an analysis to review funding, bankroll, and risk results.")
+    with data_tab:
+        st.info("Run an analysis to inspect configuration, outputs, and data previews.")
+
+
 def render_outputs(
     ohlc,
     trades,
@@ -1520,13 +1568,15 @@ def render_outputs(
     exported_files: dict[str, Path],
     analysis_state: dict[str, Any] | None = None,
 ) -> None:
-    dashboard_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
-        ["Dashboard", "Backtest", "Funding & Risk", "Data"]
+    dashboard_tab, strategy_tab, backtest_tab, funding_risk_tab, data_tab = st.tabs(
+        ["Dashboard", "Strategy", "Backtest", "Funding & Risk", "Data"]
     )
 
     state = analysis_state or {}
     with dashboard_tab:
         render_dashboard_tab(state)
+    with strategy_tab:
+        render_strategy_tab()
     with backtest_tab:
         render_backtest_tab(state)
     with funding_risk_tab:
