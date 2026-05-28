@@ -2670,6 +2670,175 @@ def render_risk_summary(
             ),
         ]
     )
+    _metric_row(
+        [
+            ("Mean Final Bankroll", _money(metrics["mean_final_bankroll"])),
+            ("Worst Lowest Bankroll", _money(metrics["worst_lowest_bankroll"])),
+            ("Avg Max Drawdown", _money(metrics["average_max_drawdown"])),
+            ("Worst Max Drawdown", _money(metrics["worst_max_drawdown"])),
+        ]
+    )
+    st.divider()
+    render_ruin_probability_curve(required_bankroll)
+    st.divider()
+    render_ruin_paths_charts(risk_result.get("paths"))
+
+
+def render_ruin_probability_curve(required_bankroll: dict[str, Any] | None) -> None:
+    if required_bankroll is None:
+        return
+    grid_results = required_bankroll.get("grid_results", [])
+    if not grid_results:
+        return
+
+    dataframe = pd.DataFrame(grid_results)
+    if dataframe.empty or not {"bankroll", "ruin_probability"}.issubset(dataframe.columns):
+        return
+
+    target = float(required_bankroll.get("target_ruin_probability", 0.05) or 0.05)
+    recommended = required_bankroll.get("recommended_bankroll")
+    y_values = pd.to_numeric(dataframe["ruin_probability"], errors="coerce") * 100
+    x_values = pd.to_numeric(dataframe["bankroll"], errors="coerce")
+    y_max = max(float(y_values.max() or 0), target * 100, 1)
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=x_values,
+            y=y_values,
+            mode="lines+markers",
+            name="Ruin Probability",
+            line=dict(color="#e05c5c", width=3),
+            marker=dict(size=8),
+        )
+    )
+    fig.add_hline(
+        y=target * 100,
+        line_dash="dash",
+        line_color="#aaaaaa",
+        annotation_text=f"Target {target:.0%}",
+        annotation_position="top right",
+    )
+    if recommended is not None:
+        fig.add_vline(
+            x=recommended,
+            line_dash="dash",
+            line_color="#2196f3",
+            annotation_text=f"Recommended ${recommended:,.0f}",
+            annotation_position="top right",
+        )
+    fig.update_layout(
+        title="Ruin Probability vs Starting Bankroll",
+        xaxis_title="Starting Bankroll ($)",
+        yaxis_title="Ruin Probability (%)",
+        yaxis_range=[0, y_max * 1.1],
+        height=320,
+        margin=dict(l=40, r=40, t=40, b=40),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def render_ruin_paths_charts(paths: list[dict[str, Any]] | None) -> None:
+    if not paths:
+        return
+    dataframe = pd.DataFrame(paths)
+    required_columns = {"final_bankroll", "ruined", "max_drawdown"}
+    if dataframe.empty or not required_columns.issubset(dataframe.columns):
+        return
+
+    dataframe["final_bankroll"] = pd.to_numeric(dataframe["final_bankroll"], errors="coerce")
+    dataframe["max_drawdown"] = pd.to_numeric(dataframe["max_drawdown"], errors="coerce")
+    dataframe = dataframe.dropna(subset=["final_bankroll", "max_drawdown"])
+    if dataframe.empty:
+        return
+
+    left_column, right_column = st.columns([1, 1])
+    with left_column:
+        st.plotly_chart(build_final_bankroll_distribution_figure(dataframe), use_container_width=True)
+    with right_column:
+        st.plotly_chart(build_max_drawdown_distribution_figure(dataframe), use_container_width=True)
+
+
+def build_final_bankroll_distribution_figure(dataframe: pd.DataFrame) -> go.Figure:
+    ruined_mask = dataframe["ruined"].apply(_truthy_value)
+    survived = dataframe.loc[~ruined_mask, "final_bankroll"]
+    ruined = dataframe.loc[ruined_mask, "final_bankroll"]
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Histogram(
+            x=survived,
+            marker_color="#4caf50",
+            name="Survived",
+            opacity=0.7,
+        )
+    )
+    fig.add_trace(
+        go.Histogram(
+            x=ruined,
+            marker_color="#e05c5c",
+            name="Ruined",
+            opacity=0.7,
+        )
+    )
+
+    quantiles = [
+        ("P5", dataframe["final_bankroll"].quantile(0.05), "#ff9800", "dot"),
+        ("Median", dataframe["final_bankroll"].median(), "#2196f3", "dash"),
+        ("P95", dataframe["final_bankroll"].quantile(0.95), "#4caf50", "dot"),
+    ]
+    for label, value, color, dash in quantiles:
+        fig.add_vline(
+            x=value,
+            line_color=color,
+            line_dash=dash,
+            annotation_text=label,
+            annotation_position="top",
+        )
+
+    fig.update_layout(
+        title="Final Bankroll Distribution",
+        xaxis_title="Final Bankroll ($)",
+        yaxis_title="Runs",
+        barmode="overlay",
+        height=300,
+        margin=dict(l=40, r=30, t=40, b=40),
+    )
+    return fig
+
+
+def _truthy_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "1", "yes", "y"}
+    return bool(value)
+
+
+def build_max_drawdown_distribution_figure(dataframe: pd.DataFrame) -> go.Figure:
+    mean_drawdown = dataframe["max_drawdown"].mean()
+    fig = go.Figure()
+    fig.add_trace(
+        go.Histogram(
+            x=dataframe["max_drawdown"],
+            marker_color="#e57c35",
+            name="Max Drawdown",
+            opacity=0.8,
+        )
+    )
+    fig.add_vline(
+        x=mean_drawdown,
+        line_color="#333",
+        line_dash="dash",
+        annotation_text="Mean",
+        annotation_position="top",
+    )
+    fig.update_layout(
+        title="Max Drawdown Distribution",
+        xaxis_title="Max Drawdown ($)",
+        yaxis_title="Runs",
+        height=300,
+        margin=dict(l=40, r=30, t=40, b=40),
+    )
+    return fig
 
 
 def render_streak_summary(streak_analysis: dict[str, Any]) -> None:
