@@ -3001,19 +3001,172 @@ def render_streak_summary(streak_analysis: dict[str, Any]) -> None:
     _metric_row(
         [
             (
-                "Max No-Payout Accounts",
+                "Max Consec. No-Payout",
                 streak_analysis["max_consecutive_no_payout_accounts"],
             ),
             (
-                "Max Negative Accounts",
+                "Max Consec. Negative",
                 streak_analysis["max_consecutive_negative_accounts"],
             ),
             (
-                "Max Failed Evaluations",
+                "Max Consec. Failed Eval",
                 streak_analysis["max_consecutive_failed_evaluations"],
             ),
         ]
     )
+    _metric_row(
+        [
+            (
+                "Max Consec. Payout",
+                streak_analysis["max_consecutive_payout_accounts"],
+            ),
+            (
+                "Max Consec. Positive",
+                streak_analysis["max_consecutive_positive_accounts"],
+            ),
+            (
+                "Max Consec. Passed Eval",
+                streak_analysis["max_consecutive_passed_evaluations"],
+            ),
+        ]
+    )
+
+    if has_streak_sequences(streak_analysis):
+        st.divider()
+        render_streak_sequence_chart(streak_analysis)
+    if has_streak_zscores(streak_analysis):
+        st.divider()
+        render_streak_zscore_chart(streak_analysis)
+
+
+def has_streak_sequences(streak_analysis: dict[str, Any]) -> bool:
+    return any(
+        streak_analysis.get(key)
+        for key in [
+            "funded_payout_sequence",
+            "net_positive_sequence",
+            "passed_evaluation_sequence",
+        ]
+    )
+
+
+def has_streak_zscores(streak_analysis: dict[str, Any]) -> bool:
+    return any(
+        streak_analysis.get(key, {}).get("z_score") is not None
+        for key in [
+            "z_score_funded_payout",
+            "z_score_net_positive",
+            "z_score_passed_evaluation",
+        ]
+    )
+
+
+def render_streak_sequence_chart(streak_analysis: dict[str, Any]) -> None:
+    sequences = {
+        "Passed Eval": streak_analysis.get("passed_evaluation_sequence", []),
+        "Net Positive": streak_analysis.get("net_positive_sequence", []),
+        "Got Payout": streak_analysis.get("funded_payout_sequence", []),
+    }
+    non_empty_sequences = [sequence for sequence in sequences.values() if sequence]
+    if not non_empty_sequences:
+        return
+
+    max_len = max(len(sequence) for sequence in non_empty_sequences)
+    z_matrix = []
+    for sequence in sequences.values():
+        padded = list(sequence) + [None] * (max_len - len(sequence))
+        z_matrix.append(padded)
+
+    fig = go.Figure(
+        go.Heatmap(
+            z=z_matrix,
+            x=list(range(1, max_len + 1)),
+            y=list(sequences.keys()),
+            colorscale=[[0, "#ef5350"], [1, "#26a69a"]],
+            zmin=0,
+            zmax=1,
+            showscale=False,
+            hovertemplate="Account %{x}<br>%{y}: %{z}<extra></extra>",
+            xgap=1,
+            ygap=3,
+        )
+    )
+    fig.update_layout(
+        title="Account Outcome Sequences",
+        xaxis_title="Account #",
+        height=180,
+        margin=dict(l=10, r=10, t=40, b=30),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "Green = success, red = failure. Each column is one account in chronological order."
+    )
+
+
+def render_streak_zscore_chart(streak_analysis: dict[str, Any]) -> None:
+    labels = ["Payout", "Net Positive", "Passed Eval"]
+    zscores = [
+        streak_analysis.get("z_score_funded_payout", {}).get("z_score"),
+        streak_analysis.get("z_score_net_positive", {}).get("z_score"),
+        streak_analysis.get("z_score_passed_evaluation", {}).get("z_score"),
+    ]
+    if all(zscore is None for zscore in zscores):
+        return
+
+    plot_values = [0 if zscore is None else zscore for zscore in zscores]
+    colors = [zscore_color(zscore) for zscore in zscores]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Bar(
+            x=plot_values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=[
+                f"z={zscore:.2f}" if zscore is not None else "N/A"
+                for zscore in zscores
+            ],
+            textposition="outside",
+            hovertemplate="%{y}: z=%{x:.3f}<extra></extra>",
+        )
+    )
+    for x_value, label, dash in [
+        (1.96, "95%", "dash"),
+        (-1.96, "", "dash"),
+        (2.58, "99%", "dot"),
+        (-2.58, "", "dot"),
+    ]:
+        fig.add_vline(
+            x=x_value,
+            line_color="#aaa",
+            line_dash=dash,
+            line_width=1,
+            annotation_text=label,
+            annotation_position="top",
+        )
+    fig.update_layout(
+        title="Runs Test Z-Score (randomness of sequences)",
+        xaxis_title="Z-Score",
+        height=220,
+        margin=dict(l=10, r=60, t=40, b=30),
+        xaxis=dict(range=[-4, 4]),
+    )
+    st.caption(
+        "Z-score measures whether winning/losing streaks are random. "
+        "|z| < 1.96 = likely random (green). "
+        "|z| > 1.96 = possible pattern (yellow/red)."
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+
+def zscore_color(zscore: float | None) -> str:
+    if zscore is None:
+        return "#888"
+    if abs(zscore) < 1.96:
+        return "#26a69a"
+    if abs(zscore) < 2.58:
+        return "#ff9800"
+    return "#ef5350"
 
 
 def render_diagnostics_tab(
