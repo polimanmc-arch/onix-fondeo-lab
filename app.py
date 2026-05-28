@@ -59,6 +59,26 @@ DEFAULT_PRESET_ACCOUNT_SIZE = 50000
 APP_VERSION = "v1.6.0-dev"
 
 
+def list_market_data_files() -> list[Path]:
+    """Return sorted CSV files from data/market_data/."""
+    if not MARKET_DATA_DIR.exists():
+        return []
+    return sorted(MARKET_DATA_DIR.glob("*.csv"), key=lambda path: path.name.lower())
+
+
+@st.cache_data
+def get_file_date_range(file_path: str) -> tuple[Any, Any] | None:
+    """Read DateTime only and return min/max dates for a market data CSV."""
+    try:
+        dataframe = pd.read_csv(file_path, usecols=["DateTime"], parse_dates=["DateTime"])
+        dates = pd.to_datetime(dataframe["DateTime"], errors="coerce").dropna()
+        if dates.empty:
+            return None
+        return dates.min().date(), dates.max().date()
+    except Exception:
+        return None
+
+
 def main() -> None:
     st.set_page_config(
         page_title="Onix Fondeo Lab",
@@ -272,13 +292,15 @@ def render_strategy_tab() -> None:
 
     with st.expander("Configuration", expanded=not has_results):
         config = render_strategy_config()
-        st.divider()
-        action_columns = st.columns([2, 1])
-        with action_columns[0]:
-            run = st.button("Run Backtest", type="primary", use_container_width=True)
-        with action_columns[1]:
-            if has_results:
-                st.caption("Results below - change config and re-run to update.")
+        run = False
+        if config:
+            st.divider()
+            action_columns = st.columns([2, 1])
+            with action_columns[0]:
+                run = st.button("Run Backtest", type="primary", use_container_width=True)
+            with action_columns[1]:
+                if has_results:
+                    st.caption("Results below - change config and re-run to update.")
 
     if run:
         with st.spinner("Running backtest..."):
@@ -290,14 +312,26 @@ def render_strategy_tab() -> None:
 
 
 def render_strategy_config() -> dict[str, Any]:
+    render_strategy_presets_section(key_prefix="cfg_")
+
     st.subheader("Market Data")
+    csv_files = list_market_data_files()
+    if not csv_files:
+        st.warning(
+            "No CSV files found in data/market_data/. "
+            "Add your OHLC files there and restart the app."
+        )
+        return {}
+
     data_columns = st.columns(4)
     with data_columns[0]:
-        st.text_input(
-            "OHLC CSV path",
-            value=str(MARKET_DATA_DIR / "sample_NQ_1m.csv"),
-            key="cfg_market_data_path",
+        selected_file = st.selectbox(
+            "Market data file",
+            options=csv_files,
+            format_func=lambda path: path.name,
+            key="cfg_market_data_file",
         )
+        market_data_path = str(selected_file)
     with data_columns[1]:
         st.text_input("Symbol", value="NQ", key="cfg_symbol")
     with data_columns[2]:
@@ -311,20 +345,32 @@ def render_strategy_config() -> dict[str, Any]:
         )
 
     st.subheader("Date Range")
+    date_range = get_file_date_range(market_data_path)
+    default_start = date_range[0] if date_range else None
+    default_end = date_range[1] if date_range else None
+    if date_range:
+        st.caption(f"Data range: {default_start} -> {default_end}")
+
+    last_file_key = "cfg_last_date_range_file"
+    if st.session_state.get(last_file_key) != market_data_path:
+        st.session_state["cfg_start_date"] = default_start
+        st.session_state["cfg_end_date"] = default_end
+        st.session_state[last_file_key] = market_data_path
+
     date_columns = st.columns(2)
     with date_columns[0]:
         st.date_input(
             "Start date",
-            value=None,
+            value=default_start,
             key="cfg_start_date",
-            help="Leave empty to use all data.",
+            help="Filter data from this date. Defaults to first bar in file.",
         )
     with date_columns[1]:
         st.date_input(
             "End date",
-            value=None,
+            value=default_end,
             key="cfg_end_date",
-            help="Leave empty to use all data.",
+            help="Filter data until this date. Defaults to last bar in file.",
         )
 
     st.subheader("Strategy")
@@ -363,10 +409,8 @@ def render_strategy_config() -> dict[str, Any]:
         st.number_input("Slippage points", min_value=0.0, value=0.0, key="cfg_slippage_points")
         st.number_input("Spread points", min_value=0.0, value=0.0, key="cfg_spread_points")
 
-    render_strategy_presets_section(key_prefix="cfg_")
-
     return {
-        "market_data_path": st.session_state.get("cfg_market_data_path", str(MARKET_DATA_DIR / "sample_NQ_1m.csv")),
+        "market_data_path": market_data_path,
         "symbol": st.session_state.get("cfg_symbol", "NQ"),
         "point_value": st.session_state.get("cfg_point_value", 20.0),
         "utc_offset": st.session_state.get("cfg_utc_offset", "UTC-5"),
