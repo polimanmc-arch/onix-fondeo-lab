@@ -14,6 +14,7 @@ SRC_DIR = ROOT_DIR / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
+import numpy as np
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
@@ -36,6 +37,12 @@ from onix_fondeo.risk_of_ruin import (
 )
 from onix_fondeo.simulator import simulate_funding
 from onix_fondeo.strategy_metrics import calculate_strategy_metrics
+from onix_fondeo.strategy_presets import (
+    delete_strategy_preset,
+    list_strategy_presets,
+    load_strategy_preset,
+    save_strategy_preset,
+)
 from onix_fondeo.strategies.random_entry import RandomEntryStrategy
 from onix_fondeo.strategies.stochastic_level import StochasticLevelStrategy
 from onix_fondeo.streaks import calculate_streak_analysis
@@ -252,6 +259,8 @@ def render_strategy_tab() -> None:
     st.subheader("Strategy Configuration Workspace")
     st.caption("Configure entry logic, time filters, risk per trade, and trading costs.")
 
+    render_strategy_presets_section()
+
     entry_column, time_column = st.columns(2)
     with entry_column:
         st.subheader("Entry Strategy")
@@ -298,6 +307,91 @@ def render_strategy_tab() -> None:
         on_click=trigger_run,
         use_container_width=True,
     )
+
+
+def render_strategy_presets_section() -> None:
+    with st.expander("Strategy Presets", expanded=False):
+        presets = list_strategy_presets()
+        preset_options = {"-- New --": None}
+        for preset in presets:
+            label = f"{preset.get('name', preset.get('_filename'))} ({preset.get('_filename')})"
+            preset_options[label] = preset.get("_filename")
+
+        selected_label = st.selectbox(
+            "Saved strategy preset",
+            options=list(preset_options),
+            key="strategy_preset_selector",
+        )
+        selected_filename = preset_options[selected_label]
+        action_columns = st.columns(2)
+        load_disabled = selected_filename is None
+        if action_columns[0].button("Load", disabled=load_disabled):
+            preset = load_strategy_preset(selected_filename)
+            apply_strategy_preset_to_session_state(preset)
+            st.success("Loaded.")
+            st.rerun()
+        if action_columns[1].button("Delete", disabled=load_disabled):
+            delete_strategy_preset(selected_filename)
+            st.warning("Deleted.")
+            st.rerun()
+
+        if not presets:
+            st.info("No saved presets.")
+
+        st.divider()
+        st.caption("Save current config as:")
+        save_columns = st.columns([3, 1])
+        preset_name = save_columns[0].text_input("Preset name", key="new_preset_name", label_visibility="collapsed")
+        if save_columns[1].button("Save"):
+            if not preset_name.strip():
+                st.warning("Enter a preset name before saving.")
+                return
+            save_strategy_preset(
+                preset_name.strip(),
+                current_strategy_preset_config(preset_name.strip()),
+            )
+            st.success("Saved.")
+            st.rerun()
+
+
+def current_strategy_preset_config(name: str) -> dict[str, Any]:
+    strategy_controls = get_strategy_controls_from_state()
+    return {
+        "name": name,
+        "strategy_name": strategy_controls["strategy_name"],
+        "strategy_params": strategy_controls["strategy_params"],
+        "start_time": strategy_controls["strategy_start_time"],
+        "end_time": strategy_controls["strategy_end_time"],
+        "force_close_time": strategy_controls["force_close_time"],
+        "contracts": strategy_controls["contracts"],
+        "stop_loss_points": strategy_controls["stop_loss_points"],
+        "take_profit_points": strategy_controls["take_profit_points"],
+        "max_holding_minutes": strategy_controls["max_holding_minutes"],
+        "commission_per_side": strategy_controls["commission_per_side"],
+        "slippage_points": strategy_controls["slippage_points"],
+        "spread_points": strategy_controls["spread_points"],
+    }
+
+
+def apply_strategy_preset_to_session_state(preset: dict[str, Any]) -> None:
+    st.session_state["strategy_name"] = preset.get("strategy_name", "stochastic")
+    apply_strategy_params_to_session_state(preset.get("strategy_params", {}))
+    mapping = {
+        "strategy_start_time": preset.get("start_time") or "",
+        "strategy_end_time": preset.get("end_time") or "",
+        "force_close_time": preset.get("force_close_time") or "",
+        "contracts": preset.get("contracts"),
+        "stop_loss_points": preset.get("stop_loss_points"),
+        "take_profit_points": preset.get("take_profit_points"),
+        "max_holding_minutes": preset.get("max_holding_minutes"),
+        "commission_per_side": preset.get("commission_per_side"),
+        "slippage_points": preset.get("slippage_points"),
+        "spread_points": preset.get("spread_points"),
+    }
+    for key, value in mapping.items():
+        if value is not None:
+            st.session_state[key] = value
+    st.session_state["strategy_config_dirty"] = True
 
 
 def trigger_run() -> None:
@@ -1973,6 +2067,16 @@ def format_comparison_dataframe(dataframe: pd.DataFrame) -> pd.DataFrame:
 
 
 def render_backtest_tab(analysis_state: dict[str, Any]) -> None:
+    strategy_metrics = analysis_state["strategy_metrics"]
+    st.subheader("Backtest Summary")
+    _metric_row(
+        [
+            ("Total Trades", strategy_metrics["total_trades"]),
+            ("Win Rate", f"{strategy_metrics['win_rate']:.2%}"),
+            ("Net PnL", _money(strategy_metrics["net_pnl"])),
+            ("Profit Factor", format_profit_factor(strategy_metrics["profit_factor"])),
+        ]
+    )
     with st.expander("Trade Explorer", expanded=True):
         render_backtest_trade_explorer(analysis_state)
     with st.expander("PnL Charts", expanded=False):
@@ -3212,6 +3316,10 @@ def render_backtest_trade_explorer(analysis_state: dict[str, Any]) -> None:
     if filtered_trades.empty:
         st.warning("No trades match the selected filters.")
         return
+    filtered_trades = add_trade_risk_price_columns(
+        filtered_trades,
+        analysis_state.get("risk_settings", {}),
+    )
 
     display_columns = [
         column
@@ -3221,15 +3329,17 @@ def render_backtest_trade_explorer(analysis_state: dict[str, Any]) -> None:
             "ExitTime",
             "Direction",
             "EntryPrice",
+            "SLPrice",
+            "TPPrice",
             "ExitPrice",
+            "Commission",
             "NetPnL",
             "ExitReason",
             "PhaseProfile",
-            "StrategyName",
         ]
         if column in filtered_trades.columns
     ]
-    st.dataframe(filtered_trades[display_columns].head(1000), use_container_width=True)
+    st.dataframe(filtered_trades[display_columns].head(5), use_container_width=True)
 
     # Future: replace selectbox with interactive row selection / double-click using streamlit-aggrid.
     trade_ids = filtered_trades["TradeID"].tolist()
@@ -3292,35 +3402,17 @@ def render_trade_explorer_filters(trades: pd.DataFrame) -> dict[str, Any]:
             str(value)
             for value in sorted(trades["EntryTime"].dt.date.dropna().unique())
         )
-    range_cols = st.columns(3)
-    with range_cols[0]:
-        selected_date = st.selectbox(
-            "Entry date",
-            options=date_values,
-            key="explorer_date_filter",
-        )
-    min_pnl = float(trades["NetPnL"].min()) if "NetPnL" in trades.columns else 0.0
-    max_pnl = float(trades["NetPnL"].max()) if "NetPnL" in trades.columns else 0.0
-    with range_cols[1]:
-        minimum_net_pnl = st.number_input(
-            "Minimum NetPnL",
-            value=min_pnl,
-            key="explorer_min_net_pnl",
-        )
-    with range_cols[2]:
-        maximum_net_pnl = st.number_input(
-            "Maximum NetPnL",
-            value=max_pnl,
-            key="explorer_max_net_pnl",
-        )
+    selected_date = st.selectbox(
+        "Entry date",
+        options=date_values,
+        key="explorer_date_filter",
+    )
 
     return {
         "direction": direction_filter,
         "exit_reason": exit_reason_filter,
         "phase_profile": phase_filter,
         "entry_date": selected_date,
-        "minimum_net_pnl": minimum_net_pnl,
-        "maximum_net_pnl": maximum_net_pnl,
     }
 
 
@@ -3353,6 +3445,33 @@ def render_filtered_trades_table(trades_df: pd.DataFrame) -> None:
         if column in filtered.columns
     ]
     st.dataframe(filtered[display_columns].head(1000), use_container_width=True)
+
+
+def add_trade_risk_price_columns(
+    trades: pd.DataFrame,
+    risk_settings: dict[str, Any],
+) -> pd.DataFrame:
+    if trades.empty or "EntryPrice" not in trades.columns or "Direction" not in trades.columns:
+        return trades
+    stop_loss_points = risk_settings.get("stop_loss_points")
+    take_profit_points = risk_settings.get("take_profit_points")
+    if stop_loss_points is None or take_profit_points is None:
+        return trades
+
+    enriched = trades.copy()
+    entry_price = pd.to_numeric(enriched["EntryPrice"], errors="coerce")
+    is_long = enriched["Direction"] == "Long"
+    enriched["SLPrice"] = np.where(
+        is_long,
+        entry_price - float(stop_loss_points),
+        entry_price + float(stop_loss_points),
+    )
+    enriched["TPPrice"] = np.where(
+        is_long,
+        entry_price + float(take_profit_points),
+        entry_price - float(take_profit_points),
+    )
+    return enriched
 
 
 def render_trade_table_filters(trades: pd.DataFrame) -> dict[str, Any]:
@@ -3388,29 +3507,11 @@ def render_trade_table_filters(trades: pd.DataFrame) -> dict[str, Any]:
             key="table_date_filter",
         )
 
-    min_pnl = float(trades["NetPnL"].min()) if "NetPnL" in trades.columns else 0.0
-    max_pnl = float(trades["NetPnL"].max()) if "NetPnL" in trades.columns else 0.0
-    pnl_cols = st.columns(2)
-    with pnl_cols[0]:
-        minimum_net_pnl = st.number_input(
-            "Table minimum NetPnL",
-            value=min_pnl,
-            key="table_min_net_pnl",
-        )
-    with pnl_cols[1]:
-        maximum_net_pnl = st.number_input(
-            "Table maximum NetPnL",
-            value=max_pnl,
-            key="table_max_net_pnl",
-        )
-
     return {
         "direction": direction_filter,
         "exit_reason": exit_reason_filter,
         "phase_profile": phase_filter,
         "entry_date": selected_date,
-        "minimum_net_pnl": minimum_net_pnl,
-        "maximum_net_pnl": maximum_net_pnl,
     }
 
 
@@ -3453,12 +3554,6 @@ def filter_trades_for_explorer(
     if filters.get("entry_date") not in {None, "All dates"} and "EntryTime" in trades.columns:
         selected_date = pd.to_datetime(filters["entry_date"]).date()
         trades = trades[trades["EntryTime"].dt.date == selected_date]
-    minimum_net_pnl = filters.get("minimum_net_pnl")
-    maximum_net_pnl = filters.get("maximum_net_pnl")
-    if minimum_net_pnl is not None:
-        trades = trades[trades["NetPnL"] >= float(minimum_net_pnl)]
-    if maximum_net_pnl is not None:
-        trades = trades[trades["NetPnL"] <= float(maximum_net_pnl)]
     return trades.sort_values("EntryTime").reset_index(drop=True)
 
 
@@ -3495,14 +3590,30 @@ def render_selected_trade_chart(
         "strategy_params": analysis_state.get("strategy_params", {}),
         "risk_settings": analysis_state.get("risk_settings", {}),
     }
-    fig = build_selected_trade_figure(ohlc_window, selected_trade, strategy_context)
-    st.plotly_chart(fig, use_container_width=True)
+    fig = build_selected_trade_figure(
+        ohlc_window,
+        selected_trade,
+        strategy_context,
+        context_minutes=context_minutes,
+    )
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": ["autoScale2d", "lasso2d", "select2d"],
+            "modeBarButtonsToAdd": ["drawline", "eraseshape"],
+            "toImageButtonOptions": {"format": "png", "scale": 2},
+        },
+    )
 
 
 def build_selected_trade_figure(
     ohlc_window: pd.DataFrame,
     selected_trade: pd.Series,
     strategy_context: dict[str, Any],
+    context_minutes: int,
 ) -> go.Figure:
     show_stochastic = strategy_context.get("strategy_name") == "stochastic"
     if show_stochastic:
@@ -3524,6 +3635,10 @@ def build_selected_trade_figure(
             low=ohlc_window["Low"],
             close=ohlc_window["Close"],
             name="OHLC",
+            increasing_line_color="#26a69a",
+            increasing_fillcolor="#26a69a",
+            decreasing_line_color="#ef5350",
+            decreasing_fillcolor="#ef5350",
         ),
         row=1,
         col=1,
@@ -3532,7 +3647,12 @@ def build_selected_trade_figure(
     _add_selected_trade_marker(fig, selected_trade, "entry")
     _add_selected_trade_marker(fig, selected_trade, "exit")
     _add_selected_trade_line(fig, selected_trade)
-    _add_sl_tp_lines(fig, selected_trade, strategy_context.get("risk_settings", {}))
+    _add_sl_tp_lines(
+        fig,
+        selected_trade,
+        strategy_context.get("risk_settings", {}),
+        context_minutes=context_minutes,
+    )
 
     if show_stochastic:
         stoch = compute_stochastic_for_chart(
@@ -3566,10 +3686,31 @@ def build_selected_trade_figure(
             f"{format_currency_full(net_pnl)} | ExitReason {exit_reason}"
         ),
         xaxis_rangeslider_visible=False,
-        height=760 if show_stochastic else 620,
+        hovermode="x unified",
+        hoverdistance=100,
+        spikedistance=1000,
+        height=760 if show_stochastic else 500,
         margin=dict(l=20, r=20, t=55, b=20),
     )
     fig.update_yaxes(title_text="Price", row=1, col=1)
+    fig.update_xaxes(
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#888",
+        spikethickness=1,
+        spikedash="dot",
+    )
+    fig.update_yaxes(
+        showspikes=True,
+        spikemode="across",
+        spikesnap="cursor",
+        spikecolor="#888",
+        spikethickness=1,
+        spikedash="dot",
+        row=1,
+        col=1,
+    )
     return fig
 
 
@@ -3646,6 +3787,7 @@ def _add_sl_tp_lines(
     fig: go.Figure,
     trade: pd.Series,
     risk_settings: dict[str, Any],
+    context_minutes: int,
 ) -> None:
     entry_price = trade.get("EntryPrice")
     direction = trade.get("Direction")
@@ -3653,12 +3795,56 @@ def _add_sl_tp_lines(
     take_profit_points = risk_settings.get("take_profit_points")
     if entry_price is None or direction not in {"Long", "Short"}:
         return
+    entry_time = pd.to_datetime(trade.get("EntryTime"), errors="coerce")
+    exit_time = pd.to_datetime(trade.get("ExitTime"), errors="coerce")
+    if pd.isna(entry_time) or pd.isna(exit_time):
+        return
+    x0 = entry_time - pd.Timedelta(minutes=context_minutes)
+    x1 = exit_time + pd.Timedelta(minutes=context_minutes)
     if stop_loss_points is not None:
         sl = entry_price - stop_loss_points if direction == "Long" else entry_price + stop_loss_points
-        fig.add_hline(y=sl, line_color="#dc2626", line_dash="dash", row=1, col=1, annotation_text="SL")
+        fig.add_shape(
+            type="line",
+            x0=x0,
+            x1=x1,
+            y0=sl,
+            y1=sl,
+            line=dict(color="#ef5350", dash="dash", width=1),
+            row=1,
+            col=1,
+        )
+        fig.add_annotation(
+            x=x1,
+            y=sl,
+            text="SL",
+            showarrow=False,
+            font=dict(color="#ef5350", size=11),
+            xanchor="left",
+            row=1,
+            col=1,
+        )
     if take_profit_points is not None:
         tp = entry_price + take_profit_points if direction == "Long" else entry_price - take_profit_points
-        fig.add_hline(y=tp, line_color="#16a34a", line_dash="dash", row=1, col=1, annotation_text="TP")
+        fig.add_shape(
+            type="line",
+            x0=x0,
+            x1=x1,
+            y0=tp,
+            y1=tp,
+            line=dict(color="#26a69a", dash="dash", width=1),
+            row=1,
+            col=1,
+        )
+        fig.add_annotation(
+            x=x1,
+            y=tp,
+            text="TP",
+            showarrow=False,
+            font=dict(color="#26a69a", size=11),
+            xanchor="left",
+            row=1,
+            col=1,
+        )
 
 
 def _selected_trade_hover_text(trade: pd.Series) -> str:
@@ -3689,6 +3875,10 @@ def build_backtest_price_figure(
                 low=ohlc["Low"],
                 close=ohlc["Close"],
                 name="OHLC",
+                increasing_line_color="#26a69a",
+                increasing_fillcolor="#26a69a",
+                decreasing_line_color="#ef5350",
+                decreasing_fillcolor="#ef5350",
             )
         ]
     )
