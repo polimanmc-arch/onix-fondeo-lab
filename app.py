@@ -2541,45 +2541,96 @@ def render_bankroll_chart(bankroll_result: dict[str, Any]) -> None:
 
     x_column = "time" if "time" in curve_df.columns and curve_df["time"].notna().any() else "step"
     curve_df["EventLabel"] = curve_df.apply(bankroll_event_label, axis=1)
-    fig = go.Figure(
-        data=[
-            go.Scatter(
-                x=curve_df[x_column],
-                y=curve_df["bankroll"],
-                mode="lines+markers",
-                line=dict(color="#2563eb", width=2),
-                hovertemplate="Step: %{x}<br>Bankroll: $%{y:,.2f}<extra></extra>",
-            )
-        ]
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=curve_df[x_column],
+            y=curve_df["bankroll"],
+            mode="lines",
+            name="Bankroll",
+            line=dict(color="#2563eb", width=2),
+            hovertemplate="Step: %{x}<br>Bankroll: $%{y:,.2f}<extra></extra>",
+        )
     )
     if "event_type" in curve_df.columns:
-        event_df = curve_df[curve_df["event_type"].astype(str) != "INITIAL"].copy()
+        event_type = curve_df["event_type"].astype(str)
+        payouts = curve_df[event_type == "PAYOUT"].copy()
+        costs = curve_df[event_type == "EVALUATION_COST"].copy()
+        initial = curve_df[event_type == "INITIAL"].copy()
     else:
-        event_df = curve_df.head(0).copy()
-    if not event_df.empty:
-        positive_events = event_df[pd.to_numeric(event_df.get("amount"), errors="coerce") >= 0]
-        negative_events = event_df[pd.to_numeric(event_df.get("amount"), errors="coerce") < 0]
-        add_bankroll_event_markers(fig, positive_events, x_column, "Positive Events", "#16a34a")
-        add_bankroll_event_markers(fig, negative_events, x_column, "Cost / Loss Events", "#dc2626")
-        for _, row in important_bankroll_events(event_df).iterrows():
-            fig.add_annotation(
-                x=row[x_column],
-                y=row["bankroll"],
-                text=str(row.get("event_type")),
-                showarrow=True,
-                arrowhead=2,
-                ax=0,
-                ay=-35,
-                bgcolor="rgba(255,255,255,0.85)",
-                bordercolor="#94a3b8",
-                font=dict(size=11),
+        payouts = curve_df.head(0).copy()
+        costs = curve_df.head(0).copy()
+        initial = curve_df.head(0).copy()
+
+    if not payouts.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=payouts[x_column],
+                y=payouts["bankroll"],
+                mode="markers",
+                name="PAYOUT",
+                marker=dict(color="#4caf50", symbol="circle", size=10),
+                customdata=payouts["amount"].abs(),
+                hovertemplate="PAYOUT<br>+$%{customdata:,.2f}<br>%{x}<extra></extra>",
             )
+        )
+    if not costs.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=costs[x_column],
+                y=costs["bankroll"],
+                mode="markers",
+                name="Account Cost",
+                marker=dict(color="#e05c5c", symbol="triangle-down", size=10),
+                customdata=costs["amount"].abs(),
+                hovertemplate="Account Cost<br>-$%{customdata:,.2f}<br>%{x}<extra></extra>",
+            )
+        )
+    if not initial.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=initial[x_column],
+                y=initial["bankroll"],
+                mode="markers",
+                name="Start",
+                marker=dict(
+                    color="#ffffff",
+                    symbol="diamond",
+                    size=8,
+                    line=dict(color="#111827", width=1),
+                ),
+                hovertemplate="Start<br>$%{y:,.2f}<br>%{x}<extra></extra>",
+            )
+        )
+
+    initial_bankroll = bankroll_result.get("metrics", {}).get("initial_bankroll")
+    if initial_bankroll is not None and not curve_df.empty:
+        x_min = curve_df[x_column].iloc[0]
+        x_max = curve_df[x_column].iloc[-1]
+        fig.add_shape(
+            type="line",
+            x0=x_min,
+            x1=x_max,
+            y0=initial_bankroll,
+            y1=initial_bankroll,
+            line=dict(color="#555", width=1, dash="dot"),
+        )
+        fig.add_annotation(
+            x=x_min,
+            y=initial_bankroll,
+            text=f"Start {format_currency_full(initial_bankroll)}",
+            showarrow=False,
+            xanchor="left",
+            yanchor="bottom",
+            font=dict(size=11, color="#555"),
+        )
     fig.update_layout(
         title="Bankroll Evolution",
         xaxis_title="Event",
         yaxis_title="Bankroll",
         height=380,
         margin=dict(l=20, r=20, t=45, b=20),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
     )
     st.plotly_chart(fig, use_container_width=True)
     st.dataframe(format_bankroll_curve_dataframe(curve_df), use_container_width=True)
