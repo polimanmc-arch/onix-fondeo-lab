@@ -564,7 +564,7 @@ def render_strategy_presets_section(key_prefix: str = "") -> None:
                          key="btn_save_preset"):
                 save_strategy_preset(new_name.strip(), _build_preset_fields_from_state())
                 st.success(f"Saved: {new_name.strip()}")
-                st.session_state["new_preset_name"] = ""
+                del st.session_state["new_preset_name"]
                 st.rerun()
 
 
