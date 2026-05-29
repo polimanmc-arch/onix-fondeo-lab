@@ -2836,40 +2836,33 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
         row_heights=[0.72, 0.28],
     )
 
-    pos = df["CumNetPnL"].clip(lower=0)
     fig.add_trace(go.Scatter(
-        x=df["ExitTime"], y=pos,
-        fill="tozeroy",
-        fillcolor="rgba(38,166,154,0.12)",
-        line=dict(width=0),
-        showlegend=False, hoverinfo="skip",
-    ), row=1, col=1)
-
-    neg = df["CumNetPnL"].clip(upper=0)
-    fig.add_trace(go.Scatter(
-        x=df["ExitTime"], y=neg,
-        fill="tozeroy",
-        fillcolor="rgba(239,83,80,0.12)",
-        line=dict(width=0),
-        showlegend=False, hoverinfo="skip",
-    ), row=1, col=1)
-
-    fig.add_trace(go.Scatter(
-        x=df["ExitTime"], y=df["CumNetPnL"],
-        name="Equity", mode="lines",
+        x=df["ExitTime"],
+        y=df["CumNetPnL"],
+        name="Equity",
+        mode="lines",
         line=dict(color="#26a69a", width=2),
+        fill="tozeroy",
+        fillcolor="rgba(38,166,154,0.15)",
         hovertemplate="Trade %{customdata}<br>Equity: $%{y:,.2f}<extra></extra>",
         customdata=df["TradeNum"],
     ), row=1, col=1)
 
-    fig.add_hline(y=0, line_color="#30363d", line_dash="dash", line_width=1, row=1, col=1)
+    fig.add_hline(
+        y=0, line_color="#30363d",
+        line_dash="dash", line_width=1,
+        row=1, col=1,
+    )
 
     fig.add_trace(go.Bar(
         x=df["ExitTime"],
         y=df["Drawdown"],
         name="Drawdown",
-        marker_color="#ef5350",
-        marker_opacity=0.75,
+        marker=dict(
+            color="#ef5350",
+            opacity=0.85,
+            line=dict(width=0),
+        ),
         hovertemplate="Drawdown: $%{y:,.2f}<extra></extra>",
     ), row=2, col=1)
 
@@ -2891,6 +2884,8 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
         ),
         xaxis2=dict(showgrid=False),
         spikedistance=1000,
+        bargap=0,
+        bargroupgap=0,
     )
     fig.update_xaxes(
         showgrid=True, gridcolor="#1c2128", gridwidth=1,
@@ -2906,7 +2901,12 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
     fig.update_yaxes(title_text="PnL", row=1, col=1)
     fig.update_yaxes(title_text="DD", row=2, col=1)
     fig.update_yaxes(
-        range=[df["Drawdown"].min() * 1.15, 0],
+        range=[df["Drawdown"].min() * 1.2, 0.0],
+        fixedrange=False,
+        tickprefix="$",
+        tickfont=dict(family="JetBrains Mono"),
+        showgrid=True,
+        gridcolor="#1c2128",
         row=2, col=1,
     )
 
@@ -4617,33 +4617,43 @@ def build_selected_trade_figure(
             f"{format_currency_full(net_pnl)} | ExitReason {exit_reason}"
         ),
         xaxis_rangeslider_visible=False,
-        hovermode="x unified",
+        hovermode="x",
         hoverdistance=100,
         spikedistance=-1,
         height=760 if show_stochastic else 500,
         margin=dict(l=20, r=20, t=55, b=20),
+        xaxis=dict(
+            showspikes=True,
+            spikemode="across+toaxis",
+            spikesnap="cursor",
+            spikecolor="#58a6ff",
+            spikethickness=1,
+            spikedash="solid",
+            showgrid=True,
+            gridcolor="#1c2128",
+            rangeslider=dict(visible=False),
+        ),
+        xaxis2=dict(
+            showspikes=True,
+            spikemode="across+toaxis",
+            spikesnap="cursor",
+            spikecolor="#58a6ff",
+            spikethickness=1,
+            spikedash="solid",
+            showgrid=True,
+            gridcolor="#1c2128",
+        ) if show_stochastic else {},
+        yaxis=dict(
+            title="Price",
+            showspikes=True,
+            spikemode="across+toaxis",
+            spikesnap="cursor",
+            spikecolor="#444c56",
+            spikethickness=1,
+            spikedash="dot",
+        ),
+        yaxis2=dict(showspikes=False) if show_stochastic else {},
     )
-    fig.update_yaxes(title_text="Price", row=1, col=1)
-    fig.update_xaxes(
-        showspikes=True,
-        spikemode="across",
-        spikesnap="cursor",
-        spikecolor="#444c56",
-        spikethickness=1,
-        spikedash="solid",
-        showgrid=True,
-        gridcolor="#1c2128",
-    )
-    fig.update_yaxes(
-        showspikes=True,
-        spikemode="across",
-        spikesnap="cursor",
-        spikecolor="#444c56",
-        spikethickness=1,
-        spikedash="solid",
-    )
-    if show_stochastic:
-        fig.update_yaxes(showspikes=False, row=2, col=1)
     return fig
 
 
