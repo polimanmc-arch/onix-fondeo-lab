@@ -2798,21 +2798,16 @@ def render_strategy_results(backtest_state: dict[str, Any]) -> None:
         st.info("No trades to display.")
         return
 
-    cumulative_net = trades_df["NetPnL"].cumsum()
-    peak = cumulative_net.cummax()
-    max_drawdown = float((peak - cumulative_net).max())
-
     pnl = strategy_metrics["net_pnl"]
     pf = strategy_metrics["profit_factor"]
     wr = strategy_metrics["win_rate"]
 
     _section_header("📊", "Performance Summary")
     render_kpi_cards([
-        ("Total Trades",  str(strategy_metrics["total_trades"]),        "#8b949e"),
+        ("Total Trades",  str(strategy_metrics["total_trades"]),             "#8b949e"),
         ("Win Rate",      f"{wr:.1%}",      "#26a69a" if wr >= 0.5 else "#ef5350"),
         ("Net PnL",       _money(pnl),      "#26a69a" if pnl >= 0 else "#ef5350"),
         ("Profit Factor", format_profit_factor(pf), "#26a69a" if pf >= 1.0 else "#ef5350"),
-        ("Max Drawdown",  _money(max_drawdown),     "#ef5350"),
     ])
     st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
     _section_header("📈", "Equity Curve")
@@ -2826,15 +2821,7 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
     df["CumNetPnL"] = df["NetPnL"].cumsum()
     df["TradeNum"] = df.index + 1
 
-    peak = df["CumNetPnL"].cummax()
-    df["Drawdown"] = df["CumNetPnL"] - peak
-
-    fig = make_subplots(
-        rows=2, cols=1,
-        shared_xaxes=True,
-        vertical_spacing=0.04,
-        row_heights=[0.72, 0.28],
-    )
+    fig = go.Figure()
 
     fig.add_trace(go.Scatter(
         x=df["ExitTime"],
@@ -2846,46 +2833,23 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
         fillcolor="rgba(38,166,154,0.15)",
         hovertemplate="Trade %{customdata}<br>Equity: $%{y:,.2f}<extra></extra>",
         customdata=df["TradeNum"],
-    ), row=1, col=1)
+    ))
 
-    fig.add_hline(
-        y=0, line_color="#30363d",
-        line_dash="dash", line_width=1,
-        row=1, col=1,
-    )
-
-    fig.add_trace(go.Bar(
-        x=df["ExitTime"],
-        y=df["Drawdown"],
-        name="Drawdown",
-        marker=dict(
-            color="#ef5350",
-            opacity=0.85,
-            line=dict(width=0),
-        ),
-        hovertemplate="Drawdown: $%{y:,.2f}<extra></extra>",
-    ), row=2, col=1)
+    fig.add_hline(y=0, line_color="#30363d", line_dash="dash", line_width=1)
 
     fig.update_layout(
-        height=420,
-        margin=dict(l=10, r=10, t=30, b=10),
+        height=300,
+        margin=dict(l=10, r=10, t=20, b=10),
         paper_bgcolor="#0d1117",
         plot_bgcolor="#0d1117",
         font=dict(family="JetBrains Mono, monospace", color="#8b949e", size=11),
-        legend=dict(
-            orientation="h", yanchor="bottom", y=1.02,
-            xanchor="right", x=1,
-            font=dict(size=11), bgcolor="rgba(0,0,0,0)",
-        ),
+        showlegend=False,
         hovermode="x unified",
         hoverlabel=dict(
             bgcolor="#161b22", bordercolor="#30363d",
             font=dict(family="JetBrains Mono", color="#e6edf3"),
         ),
-        xaxis2=dict(showgrid=False),
         spikedistance=1000,
-        bargap=0,
-        bargroupgap=0,
     )
     fig.update_xaxes(
         showgrid=True, gridcolor="#1c2128", gridwidth=1,
@@ -2897,17 +2861,7 @@ def render_equity_curve(trades_df: pd.DataFrame) -> None:
         showgrid=True, gridcolor="#1c2128", gridwidth=1,
         zeroline=False, tickprefix="$",
         tickfont=dict(family="JetBrains Mono"),
-    )
-    fig.update_yaxes(title_text="PnL", row=1, col=1)
-    fig.update_yaxes(title_text="DD", row=2, col=1)
-    fig.update_yaxes(
-        range=[df["Drawdown"].min() * 1.2, 0.0],
-        fixedrange=False,
-        tickprefix="$",
-        tickfont=dict(family="JetBrains Mono"),
-        showgrid=True,
-        gridcolor="#1c2128",
-        row=2, col=1,
+        title_text="PnL",
     )
 
     st.plotly_chart(
