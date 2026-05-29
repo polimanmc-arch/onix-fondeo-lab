@@ -8,6 +8,50 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 STRATEGY_PRESETS_DIR = PROJECT_ROOT / "config" / "strategy_presets"
 
+STRATEGY_PRESET_FIELDS = [
+    # Market data
+    "cfg_symbol",
+    "cfg_point_value",
+    "cfg_utc_offset",
+    # Strategy
+    "cfg_strategy_name",
+    # Stochastic params
+    "cfg_stoch_period_k",
+    "cfg_stoch_period_d",
+    "cfg_stoch_smooth",
+    "cfg_stoch_oversold",
+    "cfg_stoch_overbought",
+    "cfg_stoch_signal_mode",
+    "cfg_stoch_use_d_confirmation",
+    "cfg_stoch_min_k_d_gap",
+    "cfg_stoch_cooldown_bars",
+    # Random params
+    "cfg_random_probability",
+    "cfg_random_seed",
+    # Sessions
+    "cfg_session_1_enabled",
+    "cfg_session_1_start",
+    "cfg_session_1_end",
+    "cfg_session_2_enabled",
+    "cfg_session_2_start",
+    "cfg_session_2_end",
+    "cfg_session_3_enabled",
+    "cfg_session_3_start",
+    "cfg_session_3_end",
+    # Force close
+    "cfg_force_close_enabled",
+    "cfg_force_close_time",
+    # Risk
+    "cfg_contracts",
+    "cfg_stop_loss_points",
+    "cfg_take_profit_points",
+    "cfg_max_holding_minutes",
+    # Costs
+    "cfg_commission_per_side",
+    "cfg_slippage_points",
+    "cfg_spread_points",
+]
+
 
 def list_strategy_presets() -> list[dict[str, Any]]:
     """Return strategy preset dictionaries from config/strategy_presets/*.json."""
@@ -22,14 +66,13 @@ def list_strategy_presets() -> list[dict[str, Any]]:
     return presets
 
 
-def save_strategy_preset(name: str, config: dict[str, Any]) -> Path:
-    """Slugify name and write a strategy preset JSON file."""
+def save_strategy_preset(name: str, fields: dict[str, Any]) -> Path:
+    """Save a strategy preset using the {name, fields: {...}} format."""
     STRATEGY_PRESETS_DIR.mkdir(parents=True, exist_ok=True)
-    preset = dict(config)
-    preset["name"] = name
+    data = {"name": name, "fields": fields}
     output_path = STRATEGY_PRESETS_DIR / f"{slugify_strategy_preset_name(name)}.json"
     with output_path.open("w", encoding="utf-8") as file:
-        json.dump(preset, file, indent=2, default=str)
+        json.dump(data, file, indent=2, default=str)
     return output_path
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import subprocess
-from datetime import datetime
+from datetime import datetime, time as dt_time
 from pathlib import Path
 import sys
 from uuid import uuid4
@@ -38,6 +38,7 @@ from onix_fondeo.risk_of_ruin import (
 from onix_fondeo.simulator import simulate_funding
 from onix_fondeo.strategy_metrics import calculate_strategy_metrics
 from onix_fondeo.strategy_presets import (
+    STRATEGY_PRESET_FIELDS,
     delete_strategy_preset,
     list_strategy_presets,
     load_strategy_preset,
@@ -392,20 +393,54 @@ def render_strategy_config() -> dict[str, Any]:
         )
 
     _section_header("⚙️", "Strategy")
-    strategy_column, time_column = st.columns(2)
-    with strategy_column:
-        strategy_name = st.selectbox(
-            "Strategy",
-            options=["random", "stochastic"],
-            index=1,
-            key="cfg_strategy_name",
-        )
-        _strategy_controls(strategy_name, key_prefix="cfg_")
-    with time_column:
-        _section_header("🕐", "Time Filters")
-        st.text_input("Strategy start time", value="09:45", key="cfg_start_time")
-        st.text_input("Strategy end time", value="16:00", key="cfg_end_time")
-        st.text_input("Force close time", value="16:00", key="cfg_force_close_time")
+    strategy_name = st.selectbox(
+        "Strategy",
+        options=["random", "stochastic"],
+        index=1,
+        key="cfg_strategy_name",
+    )
+    _strategy_controls(strategy_name, key_prefix="cfg_")
+
+    _section_header("🕐", "Trading Sessions")
+
+    col_en, col_s, col_e = st.columns([1, 2, 2])
+    with col_en:
+        s1_enabled = st.toggle("Session 1", value=True, key="cfg_session_1_enabled")
+    with col_s:
+        st.time_input("Start", value=dt_time(9, 45), key="cfg_session_1_start",
+                      disabled=not s1_enabled, step=300)
+    with col_e:
+        st.time_input("End", value=dt_time(12, 0), key="cfg_session_1_end",
+                      disabled=not s1_enabled, step=300)
+
+    col_en, col_s, col_e = st.columns([1, 2, 2])
+    with col_en:
+        s2_enabled = st.toggle("Session 2", value=False, key="cfg_session_2_enabled")
+    with col_s:
+        st.time_input("Start", value=dt_time(13, 30), key="cfg_session_2_start",
+                      disabled=not s2_enabled, step=300)
+    with col_e:
+        st.time_input("End", value=dt_time(16, 0), key="cfg_session_2_end",
+                      disabled=not s2_enabled, step=300)
+
+    col_en, col_s, col_e = st.columns([1, 2, 2])
+    with col_en:
+        s3_enabled = st.toggle("Session 3", value=False, key="cfg_session_3_enabled")
+    with col_s:
+        st.time_input("Start", value=dt_time(15, 0), key="cfg_session_3_start",
+                      disabled=not s3_enabled, step=300)
+    with col_e:
+        st.time_input("End", value=dt_time(16, 0), key="cfg_session_3_end",
+                      disabled=not s3_enabled, step=300)
+
+    st.divider()
+
+    col_fc, col_fct = st.columns([1, 2])
+    with col_fc:
+        fc_enabled = st.toggle("Force close", value=True, key="cfg_force_close_enabled")
+    with col_fct:
+        st.time_input("Force close at", value=dt_time(16, 0),
+                      key="cfg_force_close_time", disabled=not fc_enabled, step=300)
 
     _section_header("⚖️", "Risk & Costs")
     risk_column, cost_column = st.columns(2)
@@ -436,9 +471,8 @@ def render_strategy_config() -> dict[str, Any]:
         "end_date": st.session_state.get("cfg_end_date"),
         "strategy_name": st.session_state.get("cfg_strategy_name", "stochastic"),
         "strategy_params": _read_strategy_params_from_state(key_prefix="cfg_"),
-        "start_time": _blank_to_none(str(st.session_state.get("cfg_start_time", "09:45"))),
-        "end_time": _blank_to_none(str(st.session_state.get("cfg_end_time", "16:00"))),
-        "force_close_time": _blank_to_none(str(st.session_state.get("cfg_force_close_time", "16:00"))),
+        "sessions": _build_sessions_from_state(),
+        "force_close_time": _build_force_close_from_state(),
         "contracts": st.session_state.get("cfg_contracts", 1.0),
         "stop_loss_points": st.session_state.get("cfg_stop_loss_points", 70.0),
         "take_profit_points": st.session_state.get("cfg_take_profit_points", 140.0),
@@ -449,49 +483,89 @@ def render_strategy_config() -> dict[str, Any]:
     }
 
 
+_PRESET_TIME_KEYS: frozenset[str] = frozenset({
+    "cfg_session_1_start", "cfg_session_1_end",
+    "cfg_session_2_start", "cfg_session_2_end",
+    "cfg_session_3_start", "cfg_session_3_end",
+    "cfg_force_close_time",
+})
+
+
+def _build_preset_fields_from_state() -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    for k in STRATEGY_PRESET_FIELDS:
+        if k not in st.session_state:
+            continue
+        v = st.session_state[k]
+        if isinstance(v, dt_time):
+            v = v.strftime("%H:%M")
+        fields[k] = v
+    return fields
+
+
+def _apply_preset_fields_to_state(fields: dict[str, Any]) -> None:
+    for k, v in fields.items():
+        if k in _PRESET_TIME_KEYS and isinstance(v, str):
+            try:
+                h, m = v.split(":")
+                v = dt_time(int(h), int(m))
+            except Exception:
+                pass
+        st.session_state[k] = v
+
+
 def render_strategy_presets_section(key_prefix: str = "") -> None:
     with st.expander("Strategy Presets", expanded=False):
         presets = list_strategy_presets()
-        preset_options = {"-- New --": None}
-        for preset in presets:
-            label = f"{preset.get('name', preset.get('_filename'))} ({preset.get('_filename')})"
-            preset_options[label] = preset.get("_filename")
+        preset_labels = ["-- Select --"] + [
+            p.get("name", p.get("_filename", "")) for p in presets
+        ]
+        preset_files: list[str | None] = [None] + [p["_filename"] for p in presets]
 
-        selected_label = st.selectbox(
+        selected_idx = st.selectbox(
             "Saved strategy preset",
-            options=list(preset_options),
+            options=range(len(preset_labels)),
+            format_func=lambda i: preset_labels[i],
             key="strategy_preset_selector",
         )
-        selected_filename = preset_options[selected_label]
-        action_columns = st.columns(2)
-        load_disabled = selected_filename is None
-        if action_columns[0].button("Load", disabled=load_disabled):
-            preset = load_strategy_preset(selected_filename)
-            apply_strategy_preset_to_session_state(preset, key_prefix=key_prefix)
-            st.success("Loaded.")
-            st.rerun()
-        if action_columns[1].button("Delete", disabled=load_disabled):
-            delete_strategy_preset(selected_filename)
-            st.warning("Deleted.")
-            st.rerun()
+        selected_preset = preset_labels[selected_idx]
+        selected_filename = preset_files[selected_idx]
+        is_selected = selected_filename is not None
+
+        col_load, col_del = st.columns([1, 1])
+        with col_load:
+            if st.button("⬇ Load", disabled=not is_selected,
+                         use_container_width=True, key="btn_load_preset"):
+                data = load_strategy_preset(selected_filename)
+                _apply_preset_fields_to_state(data.get("fields", {}))
+                st.success(f"Loaded: {selected_preset}")
+                st.rerun()
+        with col_del:
+            if st.button("🗑 Delete", disabled=not is_selected,
+                         use_container_width=True, key="btn_delete_preset"):
+                delete_strategy_preset(selected_filename)
+                st.rerun()
 
         if not presets:
             st.info("No saved presets.")
 
         st.divider()
-        st.caption("Save current config as:")
-        save_columns = st.columns([3, 1])
-        preset_name = save_columns[0].text_input("Preset name", key="new_preset_name", label_visibility="collapsed")
-        if save_columns[1].button("Save"):
-            if not preset_name.strip():
-                st.warning("Enter a preset name before saving.")
-                return
-            save_strategy_preset(
-                preset_name.strip(),
-                current_strategy_preset_config(preset_name.strip(), key_prefix=key_prefix),
+        col_name, col_save = st.columns([3, 1])
+        with col_name:
+            new_name = st.text_input(
+                "Save current config as:",
+                placeholder="e.g. NQ Morning Stoch",
+                key="new_preset_name",
+                label_visibility="collapsed",
             )
-            st.success("Saved.")
-            st.rerun()
+        with col_save:
+            if st.button("💾 Save", use_container_width=True,
+                         disabled=not new_name.strip(),
+                         key="btn_save_preset"):
+                save_strategy_preset(new_name.strip(), _build_preset_fields_from_state())
+                st.success(f"Saved: {new_name.strip()}")
+                st.session_state["new_preset_name"] = ""
+                st.rerun()
 
 
 def current_strategy_preset_config(name: str, key_prefix: str = "") -> dict[str, Any]:
@@ -724,6 +798,43 @@ def run_analysis(controls: dict[str, Any]) -> None:
     st.session_state["strategy_config_dirty"] = False
 
 
+def _build_sessions_from_state() -> list[dict[str, str]]:
+    state = st.session_state
+    sessions = []
+    for i, (en_key, s_key, e_key) in enumerate([
+        ("cfg_session_1_enabled", "cfg_session_1_start", "cfg_session_1_end"),
+        ("cfg_session_2_enabled", "cfg_session_2_start", "cfg_session_2_end"),
+        ("cfg_session_3_enabled", "cfg_session_3_start", "cfg_session_3_end"),
+    ], start=1):
+        if state.get(en_key, i == 1):
+            s = state.get(s_key, dt_time(9, 45))
+            e = state.get(e_key, dt_time(16, 0))
+            sessions.append({"start": s.strftime("%H:%M"), "end": e.strftime("%H:%M")})
+    return sessions
+
+
+def _build_force_close_from_state() -> str | None:
+    state = st.session_state
+    if not state.get("cfg_force_close_enabled", True):
+        return None
+    fc = state.get("cfg_force_close_time", dt_time(16, 0))
+    return fc.strftime("%H:%M")
+
+
+def _apply_session_filter(
+    ohlc: pd.DataFrame, sessions: list[dict[str, str]]
+) -> pd.DataFrame:
+    if not sessions:
+        return ohlc
+    times = ohlc["DateTime"].dt.time
+    mask = pd.Series(False, index=ohlc.index)
+    for session in sessions:
+        s = dt_time.fromisoformat(session["start"])
+        e = dt_time.fromisoformat(session["end"])
+        mask |= (times >= s) & (times <= e)
+    return ohlc[mask].copy()
+
+
 def run_strategy_backtest(config: dict[str, Any]) -> None:
     st.session_state.pop("backtest", None)
     st.session_state.pop("funding", None)
@@ -741,6 +852,11 @@ def run_strategy_backtest(config: dict[str, Any]) -> None:
         ohlc = ohlc[ohlc["DateTime"].dt.date <= config["end_date"]]
     if ohlc.empty:
         st.error("No OHLC data in selected date range.")
+        return
+
+    ohlc = _apply_session_filter(ohlc, config.get("sessions", []))
+    if ohlc.empty:
+        st.error("No data in selected sessions and date range.")
         return
 
     strategy = build_strategy_from_config(config)
@@ -772,12 +888,16 @@ def run_strategy_backtest(config: dict[str, Any]) -> None:
 
 def build_strategy_from_config(config: dict[str, Any]):
     params = config["strategy_params"]
+    # start_time/end_time handled by OHLC session pre-filter in run_strategy_backtest
+    start_time = config.get("start_time")
+    end_time = config.get("end_time")
+
     if config["strategy_name"] == "random":
         return RandomEntryStrategy(
             probability=params["probability"],
             seed=int(params["seed"]),
-            start_time=config["start_time"],
-            end_time=config["end_time"],
+            start_time=start_time,
+            end_time=end_time,
         )
 
     return StochasticLevelStrategy(
@@ -790,8 +910,8 @@ def build_strategy_from_config(config: dict[str, Any]):
         use_d_confirmation=params["use_d_confirmation"],
         min_k_d_gap=params["min_k_d_gap"],
         cooldown_bars=int(params["cooldown_bars"]),
-        start_time=config["start_time"],
-        end_time=config["end_time"],
+        start_time=start_time,
+        end_time=end_time,
     )
 
 
