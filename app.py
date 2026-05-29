@@ -86,6 +86,7 @@ def main() -> None:
         initial_sidebar_state="collapsed",
     )
     st.title("Onix Fondeo Lab")
+    _inject_global_styles()
     active_tab = render_main_navigation()
 
     if active_tab == "Strategy":
@@ -290,7 +291,21 @@ def render_strategy_tab() -> None:
     backtest_state = st.session_state.get("backtest")
     has_results = backtest_state is not None
 
-    with st.expander("Configuration", expanded=not has_results):
+    if has_results:
+        sm = backtest_state["strategy_metrics"]
+        pnl = sm["net_pnl"]
+        pnl_str = f"+${pnl:,.0f}" if pnl >= 0 else f"-${abs(pnl):,.0f}"
+        expander_label = (
+            f"⚙️ Configuration  ·  "
+            f"{backtest_state['strategy_config'].get('strategy_name', '').title()}  ·  "
+            f"{sm['total_trades']} trades  ·  "
+            f"WR {sm['win_rate']:.0%}  ·  "
+            f"PnL {pnl_str}"
+        )
+    else:
+        expander_label = "⚙️ Configuration"
+
+    with st.expander(expander_label, expanded=not has_results):
         config = render_strategy_config()
         run = False
         if config:
@@ -309,12 +324,15 @@ def render_strategy_tab() -> None:
 
     if st.session_state.get("backtest"):
         render_strategy_results(st.session_state["backtest"])
+    else:
+        render_strategy_empty_state()
 
 
 def render_strategy_config() -> dict[str, Any]:
+    _section_header("📁", "Strategy Presets")
     render_strategy_presets_section(key_prefix="cfg_")
 
-    st.subheader("Market Data")
+    _section_header("📂", "Market Data")
     csv_files = list_market_data_files()
     if not csv_files:
         st.warning(
@@ -344,7 +362,7 @@ def render_strategy_config() -> dict[str, Any]:
             help="Applied at load time. Enter as UTC-5, UTC-4, UTC+0, etc.",
         )
 
-    st.subheader("Date Range")
+    _section_header("📅", "Date Range")
     date_range = get_file_date_range(market_data_path)
     default_start = date_range[0] if date_range else None
     default_end = date_range[1] if date_range else None
@@ -373,7 +391,7 @@ def render_strategy_config() -> dict[str, Any]:
             help="Filter data until this date. Defaults to last bar in file.",
         )
 
-    st.subheader("Strategy")
+    _section_header("⚙️", "Strategy")
     strategy_column, time_column = st.columns(2)
     with strategy_column:
         strategy_name = st.selectbox(
@@ -384,12 +402,12 @@ def render_strategy_config() -> dict[str, Any]:
         )
         _strategy_controls(strategy_name, key_prefix="cfg_")
     with time_column:
-        st.subheader("Time Filters")
+        _section_header("🕐", "Time Filters")
         st.text_input("Strategy start time", value="09:45", key="cfg_start_time")
         st.text_input("Strategy end time", value="16:00", key="cfg_end_time")
         st.text_input("Force close time", value="16:00", key="cfg_force_close_time")
 
-    st.subheader("Risk & Costs")
+    _section_header("⚖️", "Risk & Costs")
     risk_column, cost_column = st.columns(2)
     with risk_column:
         st.subheader("Risk per Trade")
@@ -2784,62 +2802,124 @@ def render_strategy_results(backtest_state: dict[str, Any]) -> None:
     peak = cumulative_net.cummax()
     max_drawdown = float((peak - cumulative_net).max())
 
-    _metric_row(
-        [
-            ("Total Trades", strategy_metrics["total_trades"]),
-            ("Win Rate", f"{strategy_metrics['win_rate']:.2%}"),
-            ("Net PnL", _money(strategy_metrics["net_pnl"])),
-            ("Profit Factor", format_profit_factor(strategy_metrics["profit_factor"])),
-            ("Max Drawdown", _money(max_drawdown)),
-        ]
-    )
-    st.divider()
+    pnl = strategy_metrics["net_pnl"]
+    pf = strategy_metrics["profit_factor"]
+    wr = strategy_metrics["win_rate"]
+
+    _section_header("📊", "Performance Summary")
+    render_kpi_cards([
+        ("Total Trades",  str(strategy_metrics["total_trades"]),        "#8b949e"),
+        ("Win Rate",      f"{wr:.1%}",      "#26a69a" if wr >= 0.5 else "#ef5350"),
+        ("Net PnL",       _money(pnl),      "#26a69a" if pnl >= 0 else "#ef5350"),
+        ("Profit Factor", format_profit_factor(pf), "#26a69a" if pf >= 1.0 else "#ef5350"),
+        ("Max Drawdown",  _money(max_drawdown),     "#ef5350"),
+    ])
+    st.markdown("<div style='margin-top:8px'></div>", unsafe_allow_html=True)
+    _section_header("📈", "Equity Curve")
     render_equity_curve(trades_df)
-    st.divider()
+    _section_header("🔍", "Trade Explorer")
     render_strategy_trade_explorer(ohlc_df, trades_df, config)
 
 
 def render_equity_curve(trades_df: pd.DataFrame) -> None:
-    dataframe = trades_df.sort_values("ExitTime").copy()
-    dataframe["CumNetPnL"] = dataframe["NetPnL"].cumsum()
-    dataframe["CumGrossPnL"] = (
-        dataframe["GrossPnL"].cumsum()
-        if "GrossPnL" in dataframe.columns
-        else dataframe["CumNetPnL"]
+    df = trades_df.sort_values("ExitTime").copy().reset_index(drop=True)
+    df["CumNetPnL"] = df["NetPnL"].cumsum()
+    df["TradeNum"] = df.index + 1
+
+    peak = df["CumNetPnL"].cummax()
+    df["Drawdown"] = df["CumNetPnL"] - peak
+
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        row_heights=[0.72, 0.28],
     )
 
-    fig = go.Figure()
-    fig.add_trace(
-        go.Scatter(
-            x=dataframe["ExitTime"],
-            y=dataframe["CumNetPnL"],
-            name="Equity (Net)",
-            mode="lines",
-            line=dict(color="#26a69a", width=2),
-            hovertemplate="Trade %{pointNumber+1}<br>Net PnL: $%{y:,.2f}<extra></extra>",
-        )
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=dataframe["ExitTime"],
-            y=dataframe["CumGrossPnL"],
-            name="Gross",
-            mode="lines",
-            line=dict(color="#2196f3", width=1, dash="dot"),
-            hovertemplate="Trade %{pointNumber+1}<br>Gross PnL: $%{y:,.2f}<extra></extra>",
-        )
-    )
-    fig.add_hline(y=0, line_color="#555", line_dash="dash", line_width=1)
+    pos = df["CumNetPnL"].clip(lower=0)
+    fig.add_trace(go.Scatter(
+        x=df["ExitTime"], y=pos,
+        fill="tozeroy",
+        fillcolor="rgba(38,166,154,0.12)",
+        line=dict(width=0),
+        showlegend=False, hoverinfo="skip",
+    ), row=1, col=1)
+
+    neg = df["CumNetPnL"].clip(upper=0)
+    fig.add_trace(go.Scatter(
+        x=df["ExitTime"], y=neg,
+        fill="tozeroy",
+        fillcolor="rgba(239,83,80,0.12)",
+        line=dict(width=0),
+        showlegend=False, hoverinfo="skip",
+    ), row=1, col=1)
+
+    fig.add_trace(go.Scatter(
+        x=df["ExitTime"], y=df["CumNetPnL"],
+        name="Equity", mode="lines",
+        line=dict(color="#26a69a", width=2),
+        hovertemplate="Trade %{customdata}<br>Equity: $%{y:,.2f}<extra></extra>",
+        customdata=df["TradeNum"],
+    ), row=1, col=1)
+
+    fig.add_hline(y=0, line_color="#30363d", line_dash="dash", line_width=1, row=1, col=1)
+
+    fig.add_trace(go.Bar(
+        x=df["ExitTime"],
+        y=df["Drawdown"],
+        name="Drawdown",
+        marker_color="#ef5350",
+        marker_opacity=0.75,
+        hovertemplate="Drawdown: $%{y:,.2f}<extra></extra>",
+    ), row=2, col=1)
+
     fig.update_layout(
-        title="Equity Curve",
-        xaxis_title="Time",
-        yaxis_title="Cumulative PnL ($)",
-        height=320,
-        margin=dict(l=20, r=20, t=45, b=20),
+        height=420,
+        margin=dict(l=10, r=10, t=30, b=10),
+        paper_bgcolor="#0d1117",
+        plot_bgcolor="#0d1117",
+        font=dict(family="JetBrains Mono, monospace", color="#8b949e", size=11),
+        legend=dict(
+            orientation="h", yanchor="bottom", y=1.02,
+            xanchor="right", x=1,
+            font=dict(size=11), bgcolor="rgba(0,0,0,0)",
+        ),
         hovermode="x unified",
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        hoverlabel=dict(
+            bgcolor="#161b22", bordercolor="#30363d",
+            font=dict(family="JetBrains Mono", color="#e6edf3"),
+        ),
+        xaxis2=dict(showgrid=False),
+        spikedistance=1000,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_xaxes(
+        showgrid=True, gridcolor="#1c2128", gridwidth=1,
+        zeroline=False,
+        showspikes=True, spikecolor="#30363d",
+        spikemode="across", spikethickness=1, spikedash="dot",
+    )
+    fig.update_yaxes(
+        showgrid=True, gridcolor="#1c2128", gridwidth=1,
+        zeroline=False, tickprefix="$",
+        tickfont=dict(family="JetBrains Mono"),
+    )
+    fig.update_yaxes(title_text="PnL", row=1, col=1)
+    fig.update_yaxes(title_text="DD", row=2, col=1)
+    fig.update_yaxes(
+        range=[df["Drawdown"].min() * 1.15, 0],
+        row=2, col=1,
+    )
+
+    st.plotly_chart(
+        fig,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,
+            "displayModeBar": True,
+            "modeBarButtonsToRemove": ["lasso2d", "select2d", "autoScale2d"],
+            "toImageButtonOptions": {"format": "png", "scale": 2},
+        },
+    )
 
 
 def render_funding_summary(business_metrics: dict[str, Any]) -> None:
@@ -4137,7 +4217,25 @@ def render_strategy_trade_explorer(
         ]
         if column in filtered_trades.columns
     ]
-    st.dataframe(filtered_trades[display_columns].head(5), use_container_width=True)
+    st.dataframe(
+        filtered_trades[display_columns],
+        use_container_width=True,
+        hide_index=True,
+        height=240,
+        column_config={
+            "TradeID":    st.column_config.NumberColumn("ID",      width="small"),
+            "EntryTime":  st.column_config.DatetimeColumn("Entry", format="MM/DD HH:mm", width="medium"),
+            "ExitTime":   st.column_config.DatetimeColumn("Exit",  format="MM/DD HH:mm", width="medium"),
+            "Direction":  st.column_config.TextColumn("Dir",       width="small"),
+            "EntryPrice": st.column_config.NumberColumn("Entry $", format="%.2f",  width="small"),
+            "SLPrice":    st.column_config.NumberColumn("SL $",    format="%.2f",  width="small"),
+            "TPPrice":    st.column_config.NumberColumn("TP $",    format="%.2f",  width="small"),
+            "ExitPrice":  st.column_config.NumberColumn("Exit $",  format="%.2f",  width="small"),
+            "Commission": st.column_config.NumberColumn("Comm",    format="$%.2f", width="small"),
+            "NetPnL":     st.column_config.NumberColumn("Net PnL", format="$%.2f", width="small"),
+            "ExitReason": st.column_config.TextColumn("Reason",    width="medium"),
+        },
+    )
 
     trade_ids = filtered_trades["TradeID"].tolist()
     st.session_state["strategy_selected_trade_id"] = stable_selected_trade_id(
@@ -4521,7 +4619,7 @@ def build_selected_trade_figure(
         xaxis_rangeslider_visible=False,
         hovermode="x unified",
         hoverdistance=100,
-        spikedistance=1000,
+        spikedistance=-1,
         height=760 if show_stochastic else 500,
         margin=dict(l=20, r=20, t=55, b=20),
     )
@@ -4530,20 +4628,22 @@ def build_selected_trade_figure(
         showspikes=True,
         spikemode="across",
         spikesnap="cursor",
-        spikecolor="#888",
+        spikecolor="#444c56",
         spikethickness=1,
-        spikedash="dot",
+        spikedash="solid",
+        showgrid=True,
+        gridcolor="#1c2128",
     )
     fig.update_yaxes(
         showspikes=True,
         spikemode="across",
         spikesnap="cursor",
-        spikecolor="#888",
+        spikecolor="#444c56",
         spikethickness=1,
-        spikedash="dot",
-        row=1,
-        col=1,
+        spikedash="solid",
     )
+    if show_stochastic:
+        fig.update_yaxes(showspikes=False, row=2, col=1)
     return fig
 
 
@@ -5936,6 +6036,178 @@ def _metric_row(items: list[tuple[str, Any]]) -> None:
     columns = st.columns(len(items))
     for column, (label, value) in zip(columns, items):
         column.metric(label, value)
+
+
+def _inject_global_styles() -> None:
+    st.markdown("""
+    <style>
+    @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600&display=swap');
+
+    html, body, [class*="css"] {
+        font-family: 'Inter', sans-serif;
+    }
+
+    .metric-value, .kpi-value {
+        font-family: 'JetBrains Mono', monospace;
+    }
+
+    .stApp {
+        background-color: #0d1117;
+    }
+
+    .block-container {
+        padding-top: 1.5rem;
+        padding-bottom: 2rem;
+    }
+
+    div[data-testid="stExpander"] {
+        border: 1px solid #21262d;
+        border-radius: 8px;
+        background: #161b22;
+    }
+    div[data-testid="stExpander"] > div:first-child {
+        border-radius: 8px 8px 0 0;
+        padding: 0.75rem 1rem;
+    }
+
+    hr {
+        border-color: #21262d;
+        margin: 1.25rem 0;
+    }
+
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #21262d;
+        border-radius: 6px;
+        overflow: hidden;
+    }
+
+    div[data-testid="stSelectbox"] > div,
+    div[data-testid="stNumberInput"] > div,
+    div[data-testid="stTextInput"] > div {
+        background: #161b22;
+        border-color: #30363d;
+        border-radius: 6px;
+    }
+
+    div[data-testid="stButton"] > button[kind="primary"] {
+        background: #238636;
+        border: 1px solid #2ea043;
+        color: #fff;
+        font-weight: 600;
+        letter-spacing: 0.02em;
+        border-radius: 6px;
+        transition: background 0.15s;
+    }
+    div[data-testid="stButton"] > button[kind="primary"]:hover {
+        background: #2ea043;
+    }
+
+    div[role="radiogroup"] > label {
+        padding: 6px 18px;
+        border: 1px solid #30363d;
+        border-bottom: none;
+        border-radius: 6px 6px 0 0;
+        margin-right: 3px;
+        background: #161b22;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #8b949e;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    div[role="radiogroup"] > label:has(input:checked) {
+        background: #0d1117;
+        color: #e6edf3;
+        border-bottom: 2px solid #0d1117;
+        font-weight: 600;
+    }
+
+    .stCaption {
+        color: #6e7681;
+        font-size: 0.78rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+
+def _section_header(icon: str, title: str) -> None:
+    st.markdown(f"""
+    <div style="
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 12px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid #21262d;
+    ">
+        <span style="font-size:1rem">{icon}</span>
+        <span style="
+            font-size: 0.78rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: #8b949e;
+            font-family: 'Inter', sans-serif;
+        ">{title}</span>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def render_kpi_cards(metrics: list[tuple[str, str, str]]) -> None:
+    cols = st.columns(len(metrics))
+    for col, (label, value, color) in zip(cols, metrics):
+        with col:
+            st.markdown(f"""
+            <div style="
+                background: #161b22;
+                border: 1px solid #21262d;
+                border-top: 2px solid {color};
+                border-radius: 0 0 6px 6px;
+                padding: 14px 16px 12px;
+                height: 100%;
+            ">
+                <div style="
+                    font-size: 0.68rem;
+                    color: #6e7681;
+                    text-transform: uppercase;
+                    letter-spacing: 0.1em;
+                    font-family: 'Inter', sans-serif;
+                    font-weight: 600;
+                ">{label}</div>
+                <div style="
+                    font-size: 1.45rem;
+                    font-weight: 700;
+                    color: #e6edf3;
+                    margin-top: 6px;
+                    font-family: 'JetBrains Mono', monospace;
+                    letter-spacing: -0.02em;
+                ">{value}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+
+def render_strategy_empty_state() -> None:
+    st.markdown("""
+    <div style="
+        text-align: center;
+        padding: 60px 20px;
+        color: #6e7681;
+    ">
+        <div style="font-size: 3rem; margin-bottom: 16px">📈</div>
+        <div style="
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #8b949e;
+            margin-bottom: 8px;
+            font-family: 'Inter', sans-serif;
+        ">No results yet</div>
+        <div style="font-size: 0.85rem; color: #6e7681; max-width: 360px; margin: 0 auto">
+            Configure your strategy above and click
+            <strong style="color:#238636">&#9654; Run Backtest</strong>
+            to see the equity curve and trade analysis.
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
 
 def render_metric_grid(
